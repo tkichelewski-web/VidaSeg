@@ -117,6 +117,108 @@
   const conteudoApp = document.getElementById('conteudo-app');
 
   // ------------------------------------------------------------
+  // "RASCUNHO EM MEMÓRIA": guarda as respostas do checklist que
+  // está sendo preenchido AGORA, enquanto o auditor não termina.
+  // Ainda não vai pro banco de dados — isso vem na próxima etapa.
+  // Formato: { "id-da-pergunta-1": "Conforme", "id-da-pergunta-2": "Nao_Conforme" }
+  // ------------------------------------------------------------
+  let respostasEmAndamento = {};
+
+  // ------------------------------------------------------------
+  // Busca as perguntas de UM checklist específico e monta o formulário.
+  // Essa função não faz parte do "mapa de rotas" porque ela precisa
+  // de um parâmetro (qual checklist foi clicado) — por isso é chamada
+  // diretamente pelo clique no cartão, e não pelo menu lateral.
+  // ------------------------------------------------------------
+  async function abrirFormularioChecklist(templateId, tituloChecklist) {
+    // Zera o rascunho, pois é um checklist novo sendo aberto
+    respostasEmAndamento = {};
+
+    conteudoApp.innerHTML = `
+      <p class="text-gray-400">Carregando perguntas de "${tituloChecklist}"...</p>
+    `;
+
+    // Busca só as perguntas do checklist clicado, na ordem certa
+    const { data: perguntas, error } = await supabaseClient
+      .from('perguntas_template')
+      .select('id, ordem, texto_pergunta, norma_regulamentadora_especifica, exige_foto')
+      .eq('template_id', templateId)
+      .order('ordem', { ascending: true });
+
+    if (error) {
+      conteudoApp.innerHTML = `<p class="text-red-600">Erro ao carregar perguntas: ${error.message}</p>`;
+      return;
+    }
+
+    if (!perguntas || perguntas.length === 0) {
+      conteudoApp.innerHTML = `
+        <p class="text-gray-500">Este checklist ainda não tem perguntas cadastradas na tabela
+        <code class="bg-gray-200 px-1 rounded">perguntas_template</code>.</p>
+      `;
+      return;
+    }
+
+    // Monta o HTML de cada pergunta, com seus 3 botões de resposta
+    const perguntasHtml = perguntas.map((p, index) => `
+      <div class="bg-white border border-gray-200 rounded-lg p-5 mb-3">
+        <p class="font-semibold text-gray-800">${index + 1}. ${p.texto_pergunta}</p>
+        <p class="text-xs text-gray-400 mt-1">${p.norma_regulamentadora_especifica || ''}</p>
+
+        <div class="flex gap-2 mt-3" data-grupo-resposta="${p.id}">
+          <button data-pergunta-id="${p.id}" data-valor="Conforme"
+            class="botao-resposta px-4 py-2 rounded border text-sm font-semibold border-green-600 text-green-700 hover:bg-green-50">
+            Conforme
+          </button>
+          <button data-pergunta-id="${p.id}" data-valor="Nao_Conforme"
+            class="botao-resposta px-4 py-2 rounded border text-sm font-semibold border-red-600 text-red-700 hover:bg-red-50">
+            Não Conforme
+          </button>
+          <button data-pergunta-id="${p.id}" data-valor="Nao_Aplicavel"
+            class="botao-resposta px-4 py-2 rounded border text-sm font-semibold border-gray-400 text-gray-600 hover:bg-gray-50">
+            N/A
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    conteudoApp.innerHTML = `
+      <button id="btn-voltar-lista" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para lista</button>
+      <h2 class="text-2xl font-bold text-marca-jb mb-4">${tituloChecklist}</h2>
+      <div id="lista-perguntas">${perguntasHtml}</div>
+    `;
+
+    // Botão "Voltar": recarrega a lista de checklists
+    document.getElementById('btn-voltar-lista').addEventListener('click', () => {
+      navegarPara('nova-auditoria');
+    });
+
+    // Liga um clique em CADA botão de resposta (Conforme / Não Conforme / N/A)
+    document.querySelectorAll('.botao-resposta').forEach(botao => {
+      botao.addEventListener('click', () => {
+        const perguntaId = botao.dataset.perguntaId;
+        const valor = botao.dataset.valor;
+
+        // 1. Salva a resposta no rascunho em memória
+        respostasEmAndamento[perguntaId] = valor;
+
+        // 2. Efeito visual: dentro do grupo dessa pergunta, remove o destaque
+        //    de todos os botões e aplica só no que foi clicado agora.
+        const grupo = document.querySelector(`[data-grupo-resposta="${perguntaId}"]`);
+        grupo.querySelectorAll('.botao-resposta').forEach(b => {
+          b.classList.remove('bg-green-600', 'bg-red-600', 'bg-gray-500', 'text-white');
+        });
+
+        const cores = {
+          'Conforme': 'bg-green-600',
+          'Nao_Conforme': 'bg-red-600',
+          'Nao_Aplicavel': 'bg-gray-500'
+        };
+        botao.classList.add(cores[valor], 'text-white');
+      });
+    });
+  }
+
+  // ------------------------------------------------------------
   // "MAPA DE ROTAS": cada tela é uma função que devolve um pedaço de HTML.
   // Por enquanto são só telas de exemplo (placeholders).
   // Nos próximos passos, vamos preencher cada uma de verdade.
@@ -160,9 +262,12 @@
         return;
       }
 
-      // 5. Transforma cada checklist encontrado num "cartão" clicável
+      // 5. Transforma cada checklist encontrado num "cartão" clicável.
+      //    O atributo data-id guarda o UUID do checklist escondido no HTML,
+      //    pra sabermos qual foi clicado depois.
       const cardsHtml = checklists.map(c => `
-        <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm hover:shadow-md transition cursor-pointer">
+        <div class="card-checklist bg-white border border-gray-200 rounded-lg p-5 shadow-sm hover:shadow-md hover:border-marca-lima transition cursor-pointer"
+             data-id="${c.id}" data-titulo="${c.titulo}">
           <h3 class="font-bold text-marca-jb">${c.titulo}</h3>
           <p class="text-sm text-gray-500 mt-1">Setor: ${c.setor || '—'}</p>
           <p class="text-xs text-gray-400 mt-1">${c.norma_procedimento_base || ''}</p>
@@ -177,6 +282,15 @@
           ${cardsHtml}
         </div>
       `;
+
+      // 7. Liga um clique em CADA cartão desenhado.
+      //    Ao clicar, chama abrirFormularioChecklist() passando
+      //    o id e o título guardados no data-id / data-titulo.
+      document.querySelectorAll('.card-checklist').forEach(cartao => {
+        cartao.addEventListener('click', () => {
+          abrirFormularioChecklist(cartao.dataset.id, cartao.dataset.titulo);
+        });
+      });
     },
     'planos-acao': () => `
       <h2 class="text-2xl font-bold text-marca-jb mb-2">Planos de Ação</h2>
