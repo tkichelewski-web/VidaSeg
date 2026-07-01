@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SSMA Inteligente | Usina Santa Adélia</title>
+<title>VidaSeg | Usina Santa Adélia</title>
 
 <!-- ================================================================
      TAILWIND VIA CDN
@@ -28,6 +28,21 @@
       }
     }
   }
+</script>
+
+<!-- ================================================================
+     CONEXÃO COM O SUPABASE
+     1) Carrega a "biblioteca" (SDK) que sabe conversar com o Supabase.
+     2) Criamos um único "cliente" (supabaseClient) que o app inteiro
+        vai usar pra buscar e salvar dados. Pense nele como o telefone
+        que liga direto pro seu banco de dados.
+================================================================= -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  const SUPABASE_URL = 'https://qidgypibxllxepmhysvw.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFpZGd5cGlieGxseGVwbWh5c3Z3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MzczODcsImV4cCI6MjA5ODUxMzM4N30.5o7pmDBRtPMEFXSBns52nc6K0vc5OWH3dc_t_3CGmfU';
+
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 </script>
 
 <!-- Fonte Open Sans, padrão em todos os seus sistemas -->
@@ -111,10 +126,58 @@
       <h2 class="text-2xl font-bold text-marca-jb mb-2">Dashboard</h2>
       <p class="text-gray-500">Aqui vão entrar os indicadores gerais de SSMA.</p>
     `,
-    'nova-auditoria': () => `
-      <h2 class="text-2xl font-bold text-marca-jb mb-2">Nova Auditoria</h2>
-      <p class="text-gray-500">Aqui vai entrar o formulário de checklist.</p>
-    `,
+    'nova-auditoria': async () => {
+      // 1. Mostra uma mensagem de carregamento IMEDIATAMENTE,
+      //    porque buscar dados no Supabase leva um tempinho.
+      conteudoApp.innerHTML = `
+        <h2 class="text-2xl font-bold text-marca-jb mb-2">Nova Auditoria</h2>
+        <p class="text-gray-400">Carregando checklists disponíveis...</p>
+      `;
+
+      // 2. Pede pro Supabase: "me dá todas as linhas da tabela
+      //    checklists_templates que estiverem com ativo = true"
+      const { data: checklists, error } = await supabaseClient
+        .from('checklists_templates')
+        .select('id, titulo, setor, norma_procedimento_base')
+        .eq('ativo', true);
+
+      // 3. Se algo deu errado na conexão, avisa em vez de travar
+      if (error) {
+        conteudoApp.innerHTML = `
+          <h2 class="text-2xl font-bold text-marca-jb mb-2">Nova Auditoria</h2>
+          <p class="text-red-600">Erro ao carregar checklists: ${error.message}</p>
+        `;
+        return;
+      }
+
+      // 4. Se não tem nenhum checklist cadastrado ainda no banco
+      if (!checklists || checklists.length === 0) {
+        conteudoApp.innerHTML = `
+          <h2 class="text-2xl font-bold text-marca-jb mb-2">Nova Auditoria</h2>
+          <p class="text-gray-500">Nenhum checklist cadastrado ainda na tabela
+          <code class="bg-gray-200 px-1 rounded">checklists_templates</code>.</p>
+        `;
+        return;
+      }
+
+      // 5. Transforma cada checklist encontrado num "cartão" clicável
+      const cardsHtml = checklists.map(c => `
+        <div class="bg-white border border-gray-200 rounded-lg p-5 shadow-sm hover:shadow-md transition cursor-pointer">
+          <h3 class="font-bold text-marca-jb">${c.titulo}</h3>
+          <p class="text-sm text-gray-500 mt-1">Setor: ${c.setor || '—'}</p>
+          <p class="text-xs text-gray-400 mt-1">${c.norma_procedimento_base || ''}</p>
+        </div>
+      `).join('');
+
+      // 6. Só agora substitui o "Carregando..." pelo resultado final
+      conteudoApp.innerHTML = `
+        <h2 class="text-2xl font-bold text-marca-jb mb-2">Nova Auditoria</h2>
+        <p class="text-gray-500 mb-6">Escolha um checklist para iniciar:</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          ${cardsHtml}
+        </div>
+      `;
+    },
     'planos-acao': () => `
       <h2 class="text-2xl font-bold text-marca-jb mb-2">Planos de Ação</h2>
       <p class="text-gray-500">Aqui vão entrar os planos 5W2H.</p>
@@ -129,8 +192,17 @@
     // 1. Busca a função da rota pedida (ou usa 'dashboard' como padrão)
     const funcaoDaTela = rotas[nomeRota] || rotas['dashboard'];
 
-    // 2. Substitui SÓ o conteúdo interno da <main>
-    conteudoApp.innerHTML = funcaoDaTela();
+    // 2. Executa a função da tela.
+    //    - Telas simples (dashboard, planos-acao) devolvem um texto HTML pronto:
+    //      nesse caso, colocamos esse texto na tela.
+    //    - Telas que buscam dados no Supabase (nova-auditoria) já escrevem
+    //      o conteúdo sozinhas quando terminam de carregar; nesse caso,
+    //      o resultado da função é uma "Promise" (uma promessa de valor futuro)
+    //      e não fazemos nada aqui, só deixamos ela rodar.
+    const resultado = funcaoDaTela();
+    if (typeof resultado === 'string') {
+      conteudoApp.innerHTML = resultado;
+    }
 
     // 3. Atualiza visualmente qual item do menu está "ativo"
     document.querySelectorAll('.menu-item').forEach(btn => {
