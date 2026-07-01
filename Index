@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SSMA Inteligente | Usina Santa Adélia</title>
+
+<!-- ================================================================
+     TAILWIND VIA CDN
+     Isso baixa o Tailwind pronto, sem precisar instalar nada no PC.
+     Ideal pro piloto: zero configuração, funciona direto no GitHub Pages.
+================================================================= -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // Aqui a gente "ensina" o Tailwind a reconhecer as cores da marca
+  // Usina Santa Adélia, pra usar em qualquer lugar como bg-marca-jb, text-marca-lima etc.
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          'marca-jb': '#07583B',   // Verde escuro - Unidade JB
+          'marca-pb': '#07583C',   // Verde (variação) - Unidade PB
+          'marca-lima': '#B3DD64', // Verde lima - destaque/ação
+        },
+        fontFamily: {
+          sans: ['"Open Sans"', 'sans-serif'],
+        }
+      }
+    }
+  }
+</script>
+
+<!-- Fonte Open Sans, padrão em todos os seus sistemas -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+
+<style>
+  body { font-family: 'Open Sans', sans-serif; }
+
+  /* Item de menu ativo (a tela que você está vendo agora) */
+  .menu-item.ativo {
+    background-color: rgba(179, 221, 100, 0.15);
+    color: #B3DD64;
+    border-left: 3px solid #B3DD64;
+  }
+</style>
+</head>
+
+<body class="bg-gray-100 text-gray-800">
+
+<!-- ================================================================
+     ESTRUTURA GERAL: SIDEBAR (fixa) + CONTEÚDO (dinâmico)
+     A div id="app-shell" é o "corpo" do app. Ela é montada 1 única vez.
+================================================================= -->
+<div id="app-shell" class="flex h-screen overflow-hidden">
+
+  <!-- ============================================================
+       SIDEBAR — Menu lateral fixo. Isso NUNCA é apagado ou recriado.
+  ============================================================= -->
+  <aside id="sidebar" class="w-64 bg-marca-jb text-white flex flex-col shrink-0">
+
+    <!-- Cabeçalho / Logo -->
+    <div class="p-5 border-b border-white/10">
+      <h1 class="text-lg font-bold leading-tight">VidaSeg</h1>
+      <p class="text-xs text-white/60 mt-1">Usina Santa Adélia</p>
+    </div>
+
+    <!-- Links de navegação -->
+    <nav class="flex-1 py-4 space-y-1">
+      <button data-rota="dashboard" class="menu-item ativo w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
+        <span>📊</span> Dashboard
+      </button>
+      <button data-rota="nova-auditoria" class="menu-item w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
+        <span>📋</span> Nova Auditoria
+      </button>
+      <button data-rota="planos-acao" class="menu-item w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
+        <span>✅</span> Planos de Ação
+      </button>
+    </nav>
+
+    <!-- Rodapé da sidebar -->
+    <div class="p-5 border-t border-white/10 text-xs text-white/50">
+      Piloto — Agosto 2026
+    </div>
+  </aside>
+
+  <!-- ============================================================
+       CONTEÚDO — Só esta caixa é trocada quando você navega.
+       A sidebar ao lado permanece intacta o tempo todo.
+  ============================================================= -->
+  <main id="conteudo-app" class="flex-1 overflow-y-auto p-8">
+    <!-- O JavaScript vai injetar o conteúdo de cada tela AQUI dentro -->
+  </main>
+
+</div>
+
+<!-- ================================================================
+     JAVASCRIPT — O "cérebro" que troca de tela sem recarregar a página
+================================================================= -->
+<script>
+  // Pega a referência da caixa de conteúdo (vamos mexer só nela)
+  const conteudoApp = document.getElementById('conteudo-app');
+
+  // ------------------------------------------------------------
+  // "MAPA DE ROTAS": cada tela é uma função que devolve um pedaço de HTML.
+  // Por enquanto são só telas de exemplo (placeholders).
+  // Nos próximos passos, vamos preencher cada uma de verdade.
+  // ------------------------------------------------------------
+  const rotas = {
+    dashboard: () => `
+      <h2 class="text-2xl font-bold text-marca-jb mb-2">Dashboard</h2>
+      <p class="text-gray-500">Aqui vão entrar os indicadores gerais de SSMA.</p>
+    `,
+    'nova-auditoria': () => `
+      <h2 class="text-2xl font-bold text-marca-jb mb-2">Nova Auditoria</h2>
+      <p class="text-gray-500">Aqui vai entrar o formulário de checklist.</p>
+    `,
+    'planos-acao': () => `
+      <h2 class="text-2xl font-bold text-marca-jb mb-2">Planos de Ação</h2>
+      <p class="text-gray-500">Aqui vão entrar os planos 5W2H.</p>
+    `,
+  };
+
+  // ------------------------------------------------------------
+  // Função que efetivamente troca a tela.
+  // Repare: ela só mexe em "conteudoApp", nunca no app-shell inteiro.
+  // ------------------------------------------------------------
+  function navegarPara(nomeRota) {
+    // 1. Busca a função da rota pedida (ou usa 'dashboard' como padrão)
+    const funcaoDaTela = rotas[nomeRota] || rotas['dashboard'];
+
+    // 2. Substitui SÓ o conteúdo interno da <main>
+    conteudoApp.innerHTML = funcaoDaTela();
+
+    // 3. Atualiza visualmente qual item do menu está "ativo"
+    document.querySelectorAll('.menu-item').forEach(btn => {
+      btn.classList.toggle('ativo', btn.dataset.rota === nomeRota);
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Liga um "escutador de clique" em cada botão do menu.
+  // Quando clicado, chama navegarPara() com a rota daquele botão.
+  // ------------------------------------------------------------
+  document.querySelectorAll('.menu-item').forEach(botao => {
+    botao.addEventListener('click', () => navegarPara(botao.dataset.rota));
+  });
+
+  // Ao abrir o app pela primeira vez, mostra o Dashboard
+  navegarPara('dashboard');
+</script>
+
+</body>
+</html>
