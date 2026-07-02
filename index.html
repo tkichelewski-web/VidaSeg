@@ -335,6 +335,10 @@
       <h2 class="text-2xl font-bold text-marca-jb mb-1">Assinatura do Auditor</h2>
       <p class="text-gray-500 text-sm mb-4">Assine no quadro abaixo com o dedo ou o mouse para concluir "${tituloChecklist}".</p>
 
+      <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do Auditor</label>
+      <input id="input-nome-auditor" type="text" placeholder="Digite seu nome completo"
+        class="w-full border border-gray-300 rounded-lg p-3 mb-4 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+
       <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg overflow-hidden">
         <canvas id="canvas-assinatura" class="w-full touch-none" height="220"></canvas>
       </div>
@@ -401,12 +405,19 @@
       contexto.clearRect(0, 0, canvas.width, canvas.height);
     });
 
-    // Botão "Confirmar": converte o desenho em texto base64
-    document.getElementById('btn-confirmar-assinatura').addEventListener('click', () => {
+    // Botão "Confirmar": converte o desenho em texto base64 e salva tudo
+    document.getElementById('btn-confirmar-assinatura').addEventListener('click', async () => {
       const avisoEl = document.getElementById('aviso-assinatura');
+      const nomeAuditor = document.getElementById('input-nome-auditor').value.trim();
 
-      // Verifica se o canvas está realmente em branco (comparando com
-      // um canvas novo vazio) — impede salvar uma assinatura vazia.
+      // Validação 1: nome do auditor é obrigatório
+      if (!nomeAuditor) {
+        avisoEl.textContent = 'Por favor, informe o nome do auditor.';
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      // Validação 2: verifica se o canvas está realmente em branco
       const canvasVazio = document.createElement('canvas');
       canvasVazio.width = canvas.width;
       canvasVazio.height = canvas.height;
@@ -419,9 +430,81 @@
       avisoEl.classList.add('hidden');
       assinaturaAuditorBase64 = canvas.toDataURL('image/png');
 
-      // O Bloco 3 (próxima etapa) vai substituir este alerta pelo
-      // salvamento de verdade no banco de dados.
-      alert('Assinatura capturada! No próximo bloco, isso vai salvar tudo no banco.');
+      // Trava o botão e avisa que está salvando, pra evitar duplo-clique
+      const botaoConfirmar = document.getElementById('btn-confirmar-assinatura');
+      botaoConfirmar.disabled = true;
+      botaoConfirmar.textContent = 'Salvando...';
+
+      // ------------------------------------------------------------
+      // PASSO 1: cria o "cabeçalho" da auditoria em inspecoes_executadas.
+      // O .select() no final pede pro Supabase devolver a linha criada,
+      // pra gente pegar o "id" dela e usar no Passo 2.
+      // ------------------------------------------------------------
+      const { data: inspecaoCriada, error: erroInspecao } = await supabaseClient
+        .from('inspecoes_executadas')
+        .insert({
+          template_id: templateId,
+          nome_auditor: nomeAuditor,
+          assinatura_auditor_base64: assinaturaAuditorBase64,
+          status: 'finalizada',
+          data_hora_fim: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (erroInspecao) {
+        avisoEl.textContent = `Erro ao salvar a inspeção: ${erroInspecao.message}`;
+        avisoEl.classList.remove('hidden');
+        botaoConfirmar.disabled = false;
+        botaoConfirmar.textContent = 'Confirmar Assinatura e Salvar →';
+        return;
+      }
+
+      // ------------------------------------------------------------
+      // PASSO 2: monta UMA linha de resposta pra cada pergunta,
+      // todas já apontando pro id da inspeção criada acima.
+      // ------------------------------------------------------------
+      const linhasDeResposta = perguntas.map(p => ({
+        inspecao_id: inspecaoCriada.id,
+        pergunta_id: p.id,
+        resposta: respostasEmAndamento[p.id],
+        foto_url: fotosEmAndamento[p.id] || null
+      }));
+
+      const { error: erroRespostas } = await supabaseClient
+        .from('respostas_itens')
+        .insert(linhasDeResposta);
+
+      if (erroRespostas) {
+        avisoEl.textContent = `Inspeção criada, mas houve erro ao salvar as respostas: ${erroRespostas.message}`;
+        avisoEl.classList.remove('hidden');
+        botaoConfirmar.disabled = false;
+        botaoConfirmar.textContent = 'Confirmar Assinatura e Salvar →';
+        return;
+      }
+
+      // ------------------------------------------------------------
+      // PASSO 3: tudo salvo com sucesso — limpa o rascunho da memória
+      // e mostra a tela de confirmação final.
+      // ------------------------------------------------------------
+      respostasEmAndamento = {};
+      fotosEmAndamento = {};
+      assinaturaAuditorBase64 = null;
+
+      conteudoApp.innerHTML = `
+        <div class="text-center py-16">
+          <div class="text-5xl mb-4">✅</div>
+          <h2 class="text-2xl font-bold text-marca-jb mb-2">Auditoria salva com sucesso!</h2>
+          <p class="text-gray-500 mb-6">"${tituloChecklist}" foi registrada por ${nomeAuditor}.</p>
+          <button id="btn-nova-auditoria-final" class="bg-marca-jb text-white font-semibold px-6 py-3 rounded-lg hover:bg-marca-jb/90">
+            Iniciar Nova Auditoria
+          </button>
+        </div>
+      `;
+
+      document.getElementById('btn-nova-auditoria-final').addEventListener('click', () => {
+        navegarPara('nova-auditoria');
+      });
     });
   }
 
