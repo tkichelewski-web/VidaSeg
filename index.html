@@ -124,6 +124,10 @@
   // ------------------------------------------------------------
   let respostasEmAndamento = {};
 
+  // Guarda a URL de cada foto já enviada ao Supabase Storage.
+  // Formato: { "id-da-pergunta-1": "https://.../fotos-inspecoes/arquivo.jpg" }
+  let fotosEmAndamento = {};
+
   // ------------------------------------------------------------
   // Busca as perguntas de UM checklist específico e monta o formulário.
   // Essa função não faz parte do "mapa de rotas" porque ela precisa
@@ -133,6 +137,7 @@
   async function abrirFormularioChecklist(templateId, tituloChecklist) {
     // Zera o rascunho, pois é um checklist novo sendo aberto
     respostasEmAndamento = {};
+    fotosEmAndamento = {};
 
     conteudoApp.innerHTML = `
       <p class="text-gray-400">Carregando perguntas de "${tituloChecklist}"...</p>
@@ -178,6 +183,18 @@
             N/A
           </button>
         </div>
+
+        ${p.exige_foto ? `
+          <div class="mt-3 pt-3 border-t border-gray-100">
+            <label class="inline-flex items-center gap-2 text-sm font-semibold text-marca-jb cursor-pointer">
+              📷 Anexar foto (obrigatório)
+              <input type="file" accept="image/*" capture="environment"
+                data-input-foto="${p.id}" class="hidden">
+            </label>
+            <div data-status-foto="${p.id}" class="text-xs text-gray-400 mt-1">Nenhuma foto enviada ainda.</div>
+            <img data-preview-foto="${p.id}" class="hidden mt-2 rounded border border-gray-200 max-h-40">
+          </div>
+        ` : ''}
       </div>
     `).join('');
 
@@ -190,6 +207,55 @@
     // Botão "Voltar": recarrega a lista de checklists
     document.getElementById('btn-voltar-lista').addEventListener('click', () => {
       navegarPara('nova-auditoria');
+    });
+
+    // Liga um "escutador" em cada campo de foto.
+    // Quando o auditor escolhe/tira uma foto, isso dispara automaticamente.
+    document.querySelectorAll('[data-input-foto]').forEach(input => {
+      input.addEventListener('change', async (evento) => {
+        const perguntaId = input.dataset.inputFoto;
+        const arquivo = evento.target.files[0];
+        if (!arquivo) return;
+
+        const statusEl = document.querySelector(`[data-status-foto="${perguntaId}"]`);
+        const previewEl = document.querySelector(`[data-preview-foto="${perguntaId}"]`);
+
+        // 1. Feedback visual imediato: mostra a foto escolhida na hora
+        //    (isso usa a própria memória do navegador, ainda não subiu nada)
+        previewEl.src = URL.createObjectURL(arquivo);
+        previewEl.classList.remove('hidden');
+        statusEl.textContent = 'Enviando foto...';
+        statusEl.classList.add('text-marca-jb');
+
+        // 2. Monta um nome de arquivo único, pra nunca sobrescrever outra foto.
+        //    Formato: id-da-pergunta/timestamp-nomeoriginal.jpg
+        const nomeArquivo = `${perguntaId}/${Date.now()}-${arquivo.name}`;
+
+        // 3. Envia o arquivo de fato para o bucket fotos-inspecoes
+        const { error: erroUpload } = await supabaseClient
+          .storage
+          .from('fotos-inspecoes')
+          .upload(nomeArquivo, arquivo);
+
+        if (erroUpload) {
+          statusEl.textContent = `Erro ao enviar: ${erroUpload.message}`;
+          statusEl.classList.replace('text-marca-jb', 'text-red-600');
+          return;
+        }
+
+        // 4. Pede ao Supabase o link público permanente desse arquivo
+        const { data: urlPublica } = supabaseClient
+          .storage
+          .from('fotos-inspecoes')
+          .getPublicUrl(nomeArquivo);
+
+        // 5. Guarda essa URL no rascunho em memória, pra usar depois
+        //    quando gravarmos a inspeção inteira no banco (Bloco 3)
+        fotosEmAndamento[perguntaId] = urlPublica.publicUrl;
+
+        statusEl.textContent = '✓ Foto enviada com sucesso';
+        statusEl.classList.replace('text-marca-jb', 'text-green-600');
+      });
     });
 
     // Liga um clique em CADA botão de resposta (Conforme / Não Conforme / N/A)
