@@ -128,6 +128,10 @@
   // Formato: { "id-da-pergunta-1": "https://.../fotos-inspecoes/arquivo.jpg" }
   let fotosEmAndamento = {};
 
+  // Guarda a assinatura do auditor como texto base64 (uma "foto" do
+  // desenho feito no Canvas, convertida em texto pra poder salvar no banco).
+  let assinaturaAuditorBase64 = null;
+
   // ------------------------------------------------------------
   // Busca as perguntas de UM checklist específico e monta o formulário.
   // Essa função não faz parte do "mapa de rotas" porque ela precisa
@@ -202,11 +206,46 @@
       <button id="btn-voltar-lista" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para lista</button>
       <h2 class="text-2xl font-bold text-marca-jb mb-4">${tituloChecklist}</h2>
       <div id="lista-perguntas">${perguntasHtml}</div>
+
+      <div id="aviso-validacao" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mt-4"></div>
+
+      <button id="btn-finalizar-auditoria"
+        class="mt-4 w-full bg-marca-jb text-white font-semibold py-3 rounded-lg hover:bg-marca-jb/90 transition">
+        Finalizar Auditoria &rarr;
+      </button>
     `;
 
     // Botão "Voltar": recarrega a lista de checklists
     document.getElementById('btn-voltar-lista').addEventListener('click', () => {
       navegarPara('nova-auditoria');
+    });
+
+    // Botão "Finalizar Auditoria": confere se está tudo respondido
+    // antes de deixar o auditor avançar para a tela de assinatura.
+    document.getElementById('btn-finalizar-auditoria').addEventListener('click', () => {
+      const avisoEl = document.getElementById('aviso-validacao');
+      const pendencias = [];
+
+      perguntas.forEach((p, index) => {
+        // Falta responder essa pergunta?
+        if (!respostasEmAndamento[p.id]) {
+          pendencias.push(`Pergunta ${index + 1}: falta responder.`);
+        }
+        // Pergunta exige foto, mas nenhuma foi enviada ainda?
+        if (p.exige_foto && !fotosEmAndamento[p.id]) {
+          pendencias.push(`Pergunta ${index + 1}: falta anexar a foto obrigatória.`);
+        }
+      });
+
+      if (pendencias.length > 0) {
+        avisoEl.innerHTML = `<strong>Antes de continuar, resolva:</strong><br>${pendencias.join('<br>')}`;
+        avisoEl.classList.remove('hidden');
+        avisoEl.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+
+      avisoEl.classList.add('hidden');
+      abrirTelaAssinatura(templateId, tituloChecklist);
     });
 
     // Liga um "escutador" em cada campo de foto.
@@ -281,6 +320,108 @@
         };
         botao.classList.add(cores[valor], 'text-white');
       });
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Monta a tela de assinatura digital do auditor, usando um
+  // <canvas> HTML5 como "quadro de desenho".
+  // ------------------------------------------------------------
+  function abrirTelaAssinatura(templateId, tituloChecklist) {
+    assinaturaAuditorBase64 = null; // zera assinatura anterior, se houver
+
+    conteudoApp.innerHTML = `
+      <button id="btn-voltar-formulario" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para as perguntas</button>
+      <h2 class="text-2xl font-bold text-marca-jb mb-1">Assinatura do Auditor</h2>
+      <p class="text-gray-500 text-sm mb-4">Assine no quadro abaixo com o dedo ou o mouse para concluir "${tituloChecklist}".</p>
+
+      <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg overflow-hidden">
+        <canvas id="canvas-assinatura" class="w-full touch-none" height="220"></canvas>
+      </div>
+
+      <div class="flex gap-3 mt-3">
+        <button id="btn-limpar-assinatura" class="px-4 py-2 rounded border border-gray-400 text-gray-600 text-sm font-semibold hover:bg-gray-50">
+          Limpar
+        </button>
+      </div>
+
+      <div id="aviso-assinatura" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mt-4"></div>
+
+      <button id="btn-confirmar-assinatura"
+        class="mt-4 w-full bg-marca-lima text-marca-jb font-bold py-3 rounded-lg hover:opacity-90 transition">
+        Confirmar Assinatura e Salvar &rarr;
+      </button>
+    `;
+
+    document.getElementById('btn-voltar-formulario').addEventListener('click', () => {
+      abrirFormularioChecklist(templateId, tituloChecklist);
+    });
+
+    // --- Configuração do Canvas ---
+    const canvas = document.getElementById('canvas-assinatura');
+    const contexto = canvas.getContext('2d');
+
+    // O canvas precisa ter a MESMA largura em pixels reais que sua largura
+    // exibida na tela, senão o desenho fica desalinhado do dedo/mouse.
+    canvas.width = canvas.clientWidth;
+
+    contexto.strokeStyle = '#07583B'; // verde da marca
+    contexto.lineWidth = 2.5;
+    contexto.lineCap = 'round';
+
+    let desenhando = false;
+
+    function pegarPosicao(evento) {
+      const retangulo = canvas.getBoundingClientRect();
+      return {
+        x: evento.clientX - retangulo.left,
+        y: evento.clientY - retangulo.top
+      };
+    }
+
+    canvas.addEventListener('pointerdown', (evento) => {
+      desenhando = true;
+      const pos = pegarPosicao(evento);
+      contexto.beginPath();
+      contexto.moveTo(pos.x, pos.y);
+    });
+
+    canvas.addEventListener('pointermove', (evento) => {
+      if (!desenhando) return;
+      const pos = pegarPosicao(evento);
+      contexto.lineTo(pos.x, pos.y);
+      contexto.stroke();
+    });
+
+    canvas.addEventListener('pointerup', () => { desenhando = false; });
+    canvas.addEventListener('pointerleave', () => { desenhando = false; });
+
+    // Botão "Limpar": apaga tudo e deixa o quadro em branco de novo
+    document.getElementById('btn-limpar-assinatura').addEventListener('click', () => {
+      contexto.clearRect(0, 0, canvas.width, canvas.height);
+    });
+
+    // Botão "Confirmar": converte o desenho em texto base64
+    document.getElementById('btn-confirmar-assinatura').addEventListener('click', () => {
+      const avisoEl = document.getElementById('aviso-assinatura');
+
+      // Verifica se o canvas está realmente em branco (comparando com
+      // um canvas novo vazio) — impede salvar uma assinatura vazia.
+      const canvasVazio = document.createElement('canvas');
+      canvasVazio.width = canvas.width;
+      canvasVazio.height = canvas.height;
+      if (canvas.toDataURL() === canvasVazio.toDataURL()) {
+        avisoEl.textContent = 'Por favor, assine no quadro antes de continuar.';
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      avisoEl.classList.add('hidden');
+      assinaturaAuditorBase64 = canvas.toDataURL('image/png');
+
+      // O Bloco 3 (próxima etapa) vai substituir este alerta pelo
+      // salvamento de verdade no banco de dados.
+      alert('Assinatura capturada! No próximo bloco, isso vai salvar tudo no banco.');
     });
   }
 
