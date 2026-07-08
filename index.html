@@ -67,12 +67,26 @@
      ESTRUTURA GERAL: SIDEBAR (fixa) + CONTEÚDO (dinâmico)
      A div id="app-shell" é o "corpo" do app. Ela é montada 1 única vez.
 ================================================================= -->
-<div id="app-shell" class="flex h-screen overflow-hidden">
+<div id="app-shell" class="flex h-screen overflow-hidden relative">
 
   <!-- ============================================================
-       SIDEBAR — Menu lateral fixo. Isso NUNCA é apagado ou recriado.
+       FUNDO ESCURECIDO — só aparece no celular quando a sidebar
+       está aberta. Tocar nele fecha a sidebar (comportamento
+       comum em apps: tocar "fora" de um menu, fecha o menu).
   ============================================================= -->
-  <aside id="sidebar" class="w-64 bg-marca-jb text-white flex flex-col shrink-0">
+  <div id="overlay-sidebar" class="hidden fixed inset-0 bg-black/50 z-30 md:hidden"></div>
+
+  <!-- ============================================================
+       SIDEBAR — Menu lateral. NUNCA é apagado ou recriado.
+       No celular: fica ESCONDIDA por padrão (-translate-x-full),
+       "flutuando" por cima do conteúdo (position: fixed) quando aberta.
+       No computador (a partir do breakpoint "md"): sempre visível
+       e fixa no lugar, como já era antes (md:static md:translate-x-0).
+  ============================================================= -->
+  <aside id="sidebar" class="w-64 bg-marca-jb text-white flex flex-col shrink-0
+    fixed md:static inset-y-0 left-0 z-40
+    -translate-x-full md:translate-x-0
+    transition-transform duration-200 ease-in-out">
 
     <!-- Cabeçalho / Logo -->
     <div class="p-5 border-b border-white/10">
@@ -106,12 +120,29 @@
   </aside>
 
   <!-- ============================================================
-       CONTEÚDO — Só esta caixa é trocada quando você navega.
-       A sidebar ao lado permanece intacta o tempo todo.
+       COLUNA DA DIREITA: barra superior mobile + conteúdo.
+       Agrupar os dois num "flex-col" permite empilhar a barra
+       em cima do conteúdo, ambos ocupando a largura restante.
   ============================================================= -->
-  <main id="conteudo-app" class="flex-1 overflow-y-auto p-8">
-    <!-- O JavaScript vai injetar o conteúdo de cada tela AQUI dentro -->
-  </main>
+  <div class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- ==========================================================
+         BARRA SUPERIOR — só aparece no celular ("md:hidden" a
+         esconde a partir do breakpoint de tablet/desktop).
+         O botão ☰ é o que abre a sidebar-gaveta.
+    =========================================================== -->
+    <header class="md:hidden flex items-center gap-3 bg-marca-jb text-white p-4 shrink-0">
+      <button id="btn-abrir-menu-mobile" class="text-2xl leading-none" aria-label="Abrir menu">☰</button>
+      <span class="font-bold">VidaSeg</span>
+    </header>
+
+    <!-- ==========================================================
+         CONTEÚDO — Só esta caixa é trocada quando você navega.
+    =========================================================== -->
+    <main id="conteudo-app" class="flex-1 overflow-y-auto p-4 md:p-8">
+      <!-- O JavaScript vai injetar o conteúdo de cada tela AQUI dentro -->
+    </main>
+  </div>
 
 </div>
 
@@ -1172,11 +1203,38 @@
   }
 
   // ------------------------------------------------------------
+  // Controle da sidebar-gaveta no celular: abrir, fechar, e
+  // fechar automaticamente depois de escolher uma opção do menu.
+  // ------------------------------------------------------------
+  const sidebarEl = document.getElementById('sidebar');
+  const overlaySidebarEl = document.getElementById('overlay-sidebar');
+
+  function abrirMenuMobile() {
+    sidebarEl.classList.remove('-translate-x-full');
+    overlaySidebarEl.classList.remove('hidden');
+  }
+
+  function fecharMenuMobile() {
+    sidebarEl.classList.add('-translate-x-full');
+    overlaySidebarEl.classList.add('hidden');
+  }
+
+  document.getElementById('btn-abrir-menu-mobile').addEventListener('click', abrirMenuMobile);
+
+  // Tocar no fundo escurecido também fecha a sidebar
+  overlaySidebarEl.addEventListener('click', fecharMenuMobile);
+
+  // ------------------------------------------------------------
   // Liga um "escutador de clique" em cada botão do menu.
-  // Quando clicado, chama navegarPara() com a rota daquele botão.
+  // Quando clicado, chama navegarPara() com a rota daquele botão,
+  // e fecha a sidebar-gaveta (no celular; no computador não faz diferença,
+  // já que lá ela fica sempre visível de qualquer forma).
   // ------------------------------------------------------------
   document.querySelectorAll('.menu-item').forEach(botao => {
-    botao.addEventListener('click', () => navegarPara(botao.dataset.rota));
+    botao.addEventListener('click', () => {
+      navegarPara(botao.dataset.rota);
+      fecharMenuMobile();
+    });
   });
 
   // Ao abrir o app pela primeira vez, mostra o Dashboard
