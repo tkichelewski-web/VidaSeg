@@ -588,10 +588,21 @@
   // ------------------------------------------------------------
   function desenharArvoreHtml(nos, profundidade = 0) {
     return nos.map(no => `
-      <div style="margin-left: ${profundidade * 24}px" class="py-2 border-b border-gray-100">
-        <span class="font-semibold text-gray-800">${no.nome}</span>
-        <span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded ml-2">${no.tipo}</span>
-        ${no.unidade_sigla ? `<span class="text-xs bg-marca-lima/30 text-marca-jb px-2 py-0.5 rounded ml-1">${no.unidade_sigla}</span>` : ''}
+      <div style="margin-left: ${profundidade * 24}px" class="py-2 border-b border-gray-100 flex justify-between items-center">
+        <div>
+          <span class="font-semibold text-gray-800">${no.nome}</span>
+          <span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded ml-2">${no.tipo}</span>
+          ${no.unidade_sigla ? `<span class="text-xs bg-marca-lima/30 text-marca-jb px-2 py-0.5 rounded ml-1">${no.unidade_sigla}</span>` : ''}
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <button class="btn-editar-area text-gray-400 hover:text-marca-jb text-base"
+            data-id="${no.id}" data-nome="${no.nome}" data-tipo="${no.tipo}"
+            data-unidade="${no.unidade_sigla || ''}" data-pai="${no.area_pai_id || ''}"
+            title="Editar">✏️</button>
+          <button class="btn-excluir-area text-gray-400 hover:text-red-600 text-base"
+            data-id="${no.id}" data-nome="${no.nome}"
+            title="Excluir">🗑️</button>
+        </div>
       </div>
       ${no.filhos.length > 0 ? desenharArvoreHtml(no.filhos, profundidade + 1) : ''}
     `).join('');
@@ -616,7 +627,15 @@
   function ligarEventosTelaAreas() {
     const painel = document.getElementById('painel-form-area');
 
+    // Botão "+ Nova Área": sempre abre o formulário em BRANCO
     document.getElementById('btn-abrir-form-area').addEventListener('click', () => {
+      document.getElementById('titulo-form-area').textContent = 'Cadastrar nova área';
+      document.getElementById('input-area-id-edicao').value = '';
+      document.getElementById('input-area-nome').value = '';
+      document.getElementById('select-area-tipo').value = 'Area';
+      document.getElementById('select-area-unidade').value = '';
+      document.getElementById('select-area-pai').value = '';
+      document.getElementById('btn-salvar-area').textContent = 'Salvar Área';
       painel.classList.remove('hidden');
     });
 
@@ -624,7 +643,47 @@
       painel.classList.add('hidden');
     });
 
+    // Botão "✏️ Editar" de cada linha: preenche o formulário com os
+    // dados daquela área específica.
+    document.querySelectorAll('.btn-editar-area').forEach(botao => {
+      botao.addEventListener('click', () => {
+        document.getElementById('titulo-form-area').textContent = 'Editar área';
+        document.getElementById('input-area-id-edicao').value = botao.dataset.id;
+        document.getElementById('input-area-nome').value = botao.dataset.nome;
+        document.getElementById('select-area-tipo').value = botao.dataset.tipo;
+        document.getElementById('select-area-unidade').value = botao.dataset.unidade;
+        document.getElementById('select-area-pai').value = botao.dataset.pai;
+        document.getElementById('btn-salvar-area').textContent = 'Salvar Alterações';
+        painel.classList.remove('hidden');
+        painel.scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+
+    // Botão "🗑️ Excluir": exclusão lógica (ativo = false), preservando
+    // o histórico de auditorias que já usaram essa área.
+    document.querySelectorAll('.btn-excluir-area').forEach(botao => {
+      botao.addEventListener('click', async () => {
+        const confirmar = confirm(`Excluir a área "${botao.dataset.nome}"? Se ela tiver sub-áreas cadastradas dentro dela, elas ficarão sem vínculo de local pai.`);
+        if (!confirmar) return;
+
+        const { error } = await supabaseClient
+          .from('unidades_areas')
+          .update({ ativo: false })
+          .eq('id', botao.dataset.id);
+
+        if (error) {
+          alert(`Erro ao excluir: ${error.message}`);
+          return;
+        }
+
+        renderizarTelaAreas();
+      });
+    });
+
+    // Botão "Salvar": decide sozinho entre CRIAR ou ATUALIZAR,
+    // olhando se o campo escondido tem um id de edição preenchido.
     document.getElementById('btn-salvar-area').addEventListener('click', async () => {
+      const idEmEdicao = document.getElementById('input-area-id-edicao').value;
       const nome = document.getElementById('input-area-nome').value.trim();
       const tipo = document.getElementById('select-area-tipo').value;
       const unidadeSigla = document.getElementById('select-area-unidade').value || null;
@@ -637,14 +696,20 @@
         return;
       }
 
-      const { error } = await supabaseClient
-        .from('unidades_areas')
-        .insert({
-          nome: nome,
-          tipo: tipo,
-          unidade_sigla: unidadeSigla,
-          area_pai_id: areaPaiId
-        });
+      // Trava simples de segurança: uma área não pode ser "pai de si mesma"
+      if (idEmEdicao && areaPaiId === idEmEdicao) {
+        avisoEl.textContent = 'Uma área não pode ser sua própria área pai.';
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      const dadosArea = { nome, tipo, unidade_sigla: unidadeSigla, area_pai_id: areaPaiId };
+
+      const operacao = idEmEdicao
+        ? supabaseClient.from('unidades_areas').update(dadosArea).eq('id', idEmEdicao)
+        : supabaseClient.from('unidades_areas').insert(dadosArea);
+
+      const { error } = await operacao;
 
       if (error) {
         avisoEl.textContent = `Erro ao salvar: ${error.message}`;
@@ -653,7 +718,7 @@
       }
 
       // Sucesso: recarrega a tela inteira de Áreas, já mostrando
-      // a área nova na árvore e o formulário limpo de novo.
+      // a área nova/editada na árvore e o formulário limpo de novo.
       renderizarTelaAreas();
     });
   }
@@ -782,7 +847,9 @@
       <p class="text-gray-500 mb-4">Estrutura hierárquica de locais da usina.</p>
 
       <div id="painel-form-area" class="hidden bg-white border border-gray-200 rounded-lg p-5 mb-4">
-        <h3 class="font-bold text-marca-jb mb-3">Cadastrar nova área</h3>
+        <h3 id="titulo-form-area" class="font-bold text-marca-jb mb-3">Cadastrar nova área</h3>
+
+        <input type="hidden" id="input-area-id-edicao" value="">
 
         <label class="block text-sm font-semibold text-gray-700 mb-1">Nome</label>
         <input id="input-area-nome" type="text" placeholder="Ex: Moenda, Esteira 2, Pátio de Cana"
@@ -853,13 +920,20 @@
 
     const listaHtml = (checklists && checklists.length > 0)
       ? checklists.map(c => `
-          <div class="card-admin-checklist bg-white border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-center hover:border-marca-lima transition cursor-pointer"
-               data-id="${c.id}" data-titulo="${c.titulo}">
-            <div>
+          <div class="bg-white border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-center hover:border-marca-lima transition">
+            <div class="flex-1 cursor-pointer card-admin-checklist" data-id="${c.id}" data-titulo="${c.titulo}">
               <h3 class="font-bold text-marca-jb">${c.titulo}</h3>
               <p class="text-sm text-gray-500">Setor: ${c.setor || '—'} · ${c.norma_procedimento_base || 'sem norma vinculada'}</p>
             </div>
-            <span class="text-marca-jb text-sm font-semibold">Gerenciar perguntas &rarr;</span>
+            <div class="flex items-center gap-3 shrink-0 ml-3">
+              <span class="text-marca-jb text-sm font-semibold hidden md:inline">Gerenciar perguntas &rarr;</span>
+              <button class="btn-editar-checklist text-gray-400 hover:text-marca-jb text-lg"
+                data-id="${c.id}" data-titulo="${c.titulo}" data-setor="${c.setor || ''}" data-norma="${c.norma_procedimento_base || ''}"
+                title="Editar">✏️</button>
+              <button class="btn-excluir-checklist text-gray-400 hover:text-red-600 text-lg"
+                data-id="${c.id}" data-titulo="${c.titulo}"
+                title="Excluir">🗑️</button>
+            </div>
           </div>
         `).join('')
       : `<p class="text-gray-500">Nenhum checklist cadastrado ainda.</p>`;
@@ -874,14 +948,18 @@
       <p class="text-gray-500 mb-4">Clique em um checklist para gerenciar suas perguntas.</p>
 
       <div id="painel-form-checklist" class="hidden bg-white border border-gray-200 rounded-lg p-5 mb-4">
-        <h3 class="font-bold text-marca-jb mb-3">Cadastrar novo checklist</h3>
+        <h3 id="titulo-form-checklist" class="font-bold text-marca-jb mb-3">Cadastrar novo checklist</h3>
+
+        <!-- Campo escondido: guarda o id do checklist quando estamos EDITANDO.
+             Fica vazio quando é um cadastro novo. -->
+        <input type="hidden" id="input-checklist-id-edicao" value="">
 
         <label class="block text-sm font-semibold text-gray-700 mb-1">Título</label>
         <input id="input-checklist-titulo" type="text" placeholder="Ex: Inspeção de Máquinas e Equipamentos"
           class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
 
         <label class="block text-sm font-semibold text-gray-700 mb-1">Setor</label>
-        <input id="input-checklist-setor" type="text" placeholder="Ex: Mecânica, Agrícola, Frota"
+        <input id="input-checklist-setor" type="text" placeholder="Ex: Mecânica, Agrícola, Frota (deixe em branco se for para toda a usina)"
           class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
 
         <label class="block text-sm font-semibold text-gray-700 mb-1">Norma / Procedimento base</label>
@@ -914,7 +992,15 @@
   function ligarEventosTelaAdminChecklists() {
     const painel = document.getElementById('painel-form-checklist');
 
+    // Botão "+ Novo Checklist": abre o formulário sempre em BRANCO,
+    // limpando qualquer edição anterior que possa ter ficado no campo escondido.
     document.getElementById('btn-abrir-form-checklist').addEventListener('click', () => {
+      document.getElementById('titulo-form-checklist').textContent = 'Cadastrar novo checklist';
+      document.getElementById('input-checklist-id-edicao').value = '';
+      document.getElementById('input-checklist-titulo').value = '';
+      document.getElementById('input-checklist-setor').value = '';
+      document.getElementById('input-checklist-norma').value = '';
+      document.getElementById('btn-salvar-checklist').textContent = 'Salvar Checklist';
       painel.classList.remove('hidden');
     });
 
@@ -922,7 +1008,47 @@
       painel.classList.add('hidden');
     });
 
+    // Botão "✏️ Editar" de cada cartão: abre o MESMO formulário,
+    // mas já preenchido com os dados daquele checklist específico.
+    document.querySelectorAll('.btn-editar-checklist').forEach(botao => {
+      botao.addEventListener('click', () => {
+        document.getElementById('titulo-form-checklist').textContent = 'Editar checklist';
+        document.getElementById('input-checklist-id-edicao').value = botao.dataset.id;
+        document.getElementById('input-checklist-titulo').value = botao.dataset.titulo;
+        document.getElementById('input-checklist-setor').value = botao.dataset.setor;
+        document.getElementById('input-checklist-norma').value = botao.dataset.norma;
+        document.getElementById('btn-salvar-checklist').textContent = 'Salvar Alterações';
+        painel.classList.remove('hidden');
+        painel.scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+
+    // Botão "🗑️ Excluir": pede confirmação e faz uma EXCLUSÃO LÓGICA
+    // (marca ativo = false) em vez de apagar a linha de verdade do banco.
+    // Isso preserva o histórico de auditorias que já usaram esse checklist.
+    document.querySelectorAll('.btn-excluir-checklist').forEach(botao => {
+      botao.addEventListener('click', async () => {
+        const confirmar = confirm(`Excluir o checklist "${botao.dataset.titulo}"? Auditorias já feitas com ele continuam salvas no histórico.`);
+        if (!confirmar) return;
+
+        const { error } = await supabaseClient
+          .from('checklists_templates')
+          .update({ ativo: false })
+          .eq('id', botao.dataset.id);
+
+        if (error) {
+          alert(`Erro ao excluir: ${error.message}`);
+          return;
+        }
+
+        renderizarTelaAdminChecklists();
+      });
+    });
+
+    // Botão "Salvar": decide sozinho se CRIA um checklist novo ou
+    // ATUALIZA um existente, olhando se o campo escondido tem um id.
     document.getElementById('btn-salvar-checklist').addEventListener('click', async () => {
+      const idEmEdicao = document.getElementById('input-checklist-id-edicao').value;
       const titulo = document.getElementById('input-checklist-titulo').value.trim();
       const setor = document.getElementById('input-checklist-setor').value.trim() || null;
       const norma = document.getElementById('input-checklist-norma').value.trim() || null;
@@ -934,9 +1060,13 @@
         return;
       }
 
-      const { error } = await supabaseClient
-        .from('checklists_templates')
-        .insert({ titulo: titulo, setor: setor, norma_procedimento_base: norma });
+      // Monta a operação certa: update() se já existe um id em edição,
+      // insert() se o campo escondido estiver vazio (cadastro novo).
+      const operacao = idEmEdicao
+        ? supabaseClient.from('checklists_templates').update({ titulo, setor, norma_procedimento_base: norma }).eq('id', idEmEdicao)
+        : supabaseClient.from('checklists_templates').insert({ titulo, setor, norma_procedimento_base: norma });
+
+      const { error } = await operacao;
 
       if (error) {
         avisoEl.textContent = `Erro ao salvar: ${error.message}`;
