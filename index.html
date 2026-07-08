@@ -221,13 +221,15 @@
           <option value="PB">PB (Pereira Barreto)</option>
         </select>
 
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Local da Inspeção</label>
-        <input type="hidden" id="input-area-inspecao-id" value="">
-        <button id="btn-abrir-seletor-area" type="button" disabled
-          class="w-full text-left border border-gray-300 rounded-lg p-3 flex justify-between items-center bg-gray-100 text-gray-400 cursor-not-allowed">
-          <span id="texto-area-selecionada">Selecione a unidade primeiro</span>
-          <span>&rsaquo;</span>
-        </button>
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Área</label>
+        <select id="select-area-ident" class="w-full border border-gray-300 rounded-lg p-2.5 mb-4" disabled>
+          <option value="">— Selecione a unidade primeiro —</option>
+        </select>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Subárea <span class="font-normal text-gray-400">(se houver)</span></label>
+        <select id="select-subarea-ident" class="w-full border border-gray-300 rounded-lg p-2.5" disabled>
+          <option value="">— Selecione a área primeiro —</option>
+        </select>
       </div>
 
       <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
@@ -248,17 +250,6 @@
         class="w-full bg-marca-jb text-white font-semibold py-3 rounded-lg hover:bg-marca-jb/90 transition">
         Avançar &rarr;
       </button>
-
-      <!-- Painel de seleção de área (mesma "gaveta" que já usamos antes) -->
-      <div id="painel-seletor-area" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center">
-        <div class="bg-white w-full md:max-w-md md:rounded-xl rounded-t-xl max-h-[80vh] flex flex-col">
-          <div class="p-4 border-b border-gray-200 flex justify-between items-center shrink-0">
-            <h3 class="font-bold text-marca-jb">Selecione o local da inspeção</h3>
-            <button id="btn-fechar-seletor-area" class="text-gray-400 text-xl leading-none">&times;</button>
-          </div>
-          <div id="conteudo-seletor-area" class="overflow-y-auto p-2"></div>
-        </div>
-      </div>
     `;
 
     document.getElementById('btn-voltar-lista-ident').addEventListener('click', () => {
@@ -276,63 +267,73 @@
       adicionarCampoPessoa('lista-campos-auditados', 'auditado');
     });
 
-    // Quando a Unidade é escolhida: filtra as áreas daquela unidade
-    // e libera o botão do seletor de local (antes travado).
+    const selectArea = document.getElementById('select-area-ident');
+    const selectSubarea = document.getElementById('select-subarea-ident');
+
+    // ------------------------------------------------------------
+    // 1º nível: escolher a UNIDADE filtra quais ÁREAS aparecem
+    // (só as que são tipo "Area" E pertencem a essa unidade).
+    // ------------------------------------------------------------
     document.getElementById('select-unidade-ident').addEventListener('change', (evento) => {
       const unidadeEscolhida = evento.target.value;
-      const botaoArea = document.getElementById('btn-abrir-seletor-area');
-      const textoArea = document.getElementById('texto-area-selecionada');
 
-      // Zera a área escolhida anteriormente, pois mudou a unidade
-      document.getElementById('input-area-inspecao-id').value = '';
+      // Reseta os dois selects seguintes, pois mudou a unidade
+      selectSubarea.innerHTML = `<option value="">— Selecione a área primeiro —</option>`;
+      selectSubarea.disabled = true;
 
       if (!unidadeEscolhida) {
-        botaoArea.disabled = true;
-        botaoArea.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
-        textoArea.textContent = 'Selecione a unidade primeiro';
+        selectArea.innerHTML = `<option value="">— Selecione a unidade primeiro —</option>`;
+        selectArea.disabled = true;
         return;
       }
 
-      // Filtra só as áreas daquela unidade, ANTES de montar a árvore
-      const areasDaUnidade = areasDisponiveis.filter(a => a.unidade_sigla === unidadeEscolhida);
-      const arvoreFiltrada = construirArvoreAreas(areasDaUnidade);
-      document.getElementById('conteudo-seletor-area').innerHTML = desenharArvoreSelecionavel(arvoreFiltrada);
-
-      // Liga o clique em cada área recém-desenhada
-      document.querySelectorAll('.item-area-selecionavel').forEach(item => {
-        item.addEventListener('click', () => {
-          document.getElementById('input-area-inspecao-id').value = item.dataset.id;
-          textoArea.textContent = item.dataset.nome;
-          textoArea.classList.remove('text-gray-400');
-          textoArea.classList.add('text-gray-800', 'font-semibold');
-          document.getElementById('painel-seletor-area').classList.add('hidden');
-        });
-      });
-
-      botaoArea.disabled = false;
-      botaoArea.classList.remove('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
-      botaoArea.classList.add('bg-gray-50', 'text-gray-800');
-      textoArea.textContent = 'Toque para selecionar a área';
-      textoArea.classList.remove('text-gray-800', 'font-semibold');
-      textoArea.classList.add('text-gray-500');
+      const areasFiltradas = areasDisponiveis.filter(a => a.tipo === 'Area' && a.unidade_sigla === unidadeEscolhida);
+      selectArea.innerHTML = `<option value="">— Selecione a área —</option>` +
+        areasFiltradas.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
+      selectArea.disabled = false;
     });
 
-    document.getElementById('btn-abrir-seletor-area').addEventListener('click', () => {
-      document.getElementById('painel-seletor-area').classList.remove('hidden');
-    });
-    document.getElementById('btn-fechar-seletor-area').addEventListener('click', () => {
-      document.getElementById('painel-seletor-area').classList.add('hidden');
+    // ------------------------------------------------------------
+    // 2º nível: escolher a ÁREA filtra quais SUBÁREAS aparecem
+    // (só as que apontam pra essa área como pai). Se não houver
+    // nenhuma subárea cadastrada, o campo continua desabilitado
+    // e simplesmente não é obrigatório escolher nada nele.
+    // ------------------------------------------------------------
+    selectArea.addEventListener('change', (evento) => {
+      const areaEscolhidaId = evento.target.value;
+
+      if (!areaEscolhidaId) {
+        selectSubarea.innerHTML = `<option value="">— Selecione a área primeiro —</option>`;
+        selectSubarea.disabled = true;
+        return;
+      }
+
+      const subareasFiltradas = areasDisponiveis.filter(a => a.tipo === 'Subarea' && a.area_pai_id === areaEscolhidaId);
+
+      if (subareasFiltradas.length === 0) {
+        selectSubarea.innerHTML = `<option value="">— Esta área não tem subáreas —</option>`;
+        selectSubarea.disabled = true;
+        return;
+      }
+
+      selectSubarea.innerHTML = `<option value="">— Nenhuma (usar só a área) —</option>` +
+        subareasFiltradas.map(a => `<option value="${a.id}">${a.nome}</option>`).join('');
+      selectSubarea.disabled = false;
     });
 
     // Botão "Avançar": valida o essencial e segue pro formulário de perguntas
     document.getElementById('btn-avancar-identificacao').addEventListener('click', () => {
       const avisoEl = document.getElementById('aviso-identificacao');
-      const areaId = document.getElementById('input-area-inspecao-id').value;
+
+      // O local final é a Subárea, se escolhida; senão, a Área escolhida.
+      // Assim o auditor não é obrigado a ter subárea cadastrada pra avançar.
+      const areaId = selectSubarea.value || selectArea.value;
+
       const auditores = coletarValoresPessoa('lista-campos-auditores');
       const auditados = coletarValoresPessoa('lista-campos-auditados');
       const pendencias = [];
 
-      if (!areaId) pendencias.push('Selecione a unidade e o local da inspeção.');
+      if (!areaId) pendencias.push('Selecione a unidade e a área da inspeção.');
       if (auditores.length === 0) pendencias.push('Informe ao menos um auditor.');
 
       if (pendencias.length > 0) {
@@ -348,38 +349,86 @@
   }
 
   // ------------------------------------------------------------
-  // Adiciona uma linha de "campo de nome + botão remover (×)"
-  // dentro do container indicado (lista de auditores ou auditados).
+  // Adiciona uma linha de "campo de matrícula + nome encontrado +
+  // botão remover (×)" dentro do container indicado (lista de
+  // auditores ou auditados). Ao digitar a matrícula e sair do campo
+  // (evento "blur"), busca o nome correspondente na tabela colaboradores.
   // ------------------------------------------------------------
   function adicionarCampoPessoa(idContainer, tipoRotulo) {
     const container = document.getElementById(idContainer);
     const linha = document.createElement('div');
-    linha.className = 'flex gap-2 mb-2 campo-pessoa';
+    linha.className = 'mb-2 campo-pessoa';
     linha.innerHTML = `
-      <input type="text" placeholder="Nome do ${tipoRotulo}"
-        class="input-pessoa flex-1 border border-gray-300 rounded-lg p-2.5">
-      <button type="button" class="btn-remover-pessoa text-gray-400 hover:text-red-600 px-2" title="Remover">&times;</button>
+      <div class="flex gap-2">
+        <input type="text" inputmode="numeric" placeholder="Matrícula do ${tipoRotulo}"
+          class="input-matricula w-32 border border-gray-300 rounded-lg p-2.5">
+        <div class="flex-1 border border-gray-200 rounded-lg p-2.5 bg-gray-50 text-sm text-gray-400 texto-nome-encontrado">
+          Digite a matrícula para buscar o nome
+        </div>
+        <button type="button" class="btn-remover-pessoa text-gray-400 hover:text-red-600 px-2" title="Remover">&times;</button>
+      </div>
     `;
     container.appendChild(linha);
+
+    const inputMatricula = linha.querySelector('.input-matricula');
+    const textoNome = linha.querySelector('.texto-nome-encontrado');
+
+    // Guarda o nome confirmado direto no próprio elemento da linha,
+    // pra coletarValoresPessoa() conseguir ler depois sem buscar de novo.
+    linha.dataset.nomeConfirmado = '';
+
+    inputMatricula.addEventListener('blur', async () => {
+      const matricula = inputMatricula.value.trim();
+      linha.dataset.nomeConfirmado = '';
+
+      if (!matricula) {
+        textoNome.textContent = 'Digite a matrícula para buscar o nome';
+        textoNome.className = 'flex-1 border border-gray-200 rounded-lg p-2.5 bg-gray-50 text-sm text-gray-400 texto-nome-encontrado';
+        return;
+      }
+
+      textoNome.textContent = 'Buscando...';
+
+      const { data: colaborador, error } = await supabaseClient
+        .from('colaboradores')
+        .select('nome')
+        .eq('matricula', matricula)
+        .eq('ativo', true)
+        .maybeSingle();
+
+      if (error || !colaborador) {
+        textoNome.textContent = 'Matrícula não encontrada';
+        textoNome.className = 'flex-1 border border-red-300 rounded-lg p-2.5 bg-red-50 text-sm text-red-600 texto-nome-encontrado';
+        return;
+      }
+
+      // Encontrou! Guarda o nome confirmado e mostra pro auditor conferir.
+      linha.dataset.nomeConfirmado = colaborador.nome;
+      textoNome.textContent = `✓ ${colaborador.nome}`;
+      textoNome.className = 'flex-1 border border-green-300 rounded-lg p-2.5 bg-green-50 text-sm text-green-700 font-semibold texto-nome-encontrado';
+    });
 
     linha.querySelector('.btn-remover-pessoa').addEventListener('click', () => {
       // Nunca deixa remover a última linha — sempre sobra pelo menos 1 campo
       if (container.querySelectorAll('.campo-pessoa').length > 1) {
         linha.remove();
       } else {
-        linha.querySelector('.input-pessoa').value = '';
+        inputMatricula.value = '';
+        linha.dataset.nomeConfirmado = '';
+        textoNome.textContent = 'Digite a matrícula para buscar o nome';
+        textoNome.className = 'flex-1 border border-gray-200 rounded-lg p-2.5 bg-gray-50 text-sm text-gray-400 texto-nome-encontrado';
       }
     });
   }
 
   // ------------------------------------------------------------
-  // Lê todos os campos de nome preenchidos dentro de um container,
-  // ignorando os que ficaram em branco, e devolve uma lista simples.
+  // Lê todos os nomes CONFIRMADOS (matrícula encontrada com sucesso)
+  // dentro de um container, ignorando linhas sem matrícula válida.
   // ------------------------------------------------------------
   function coletarValoresPessoa(idContainer) {
-    return Array.from(document.getElementById(idContainer).querySelectorAll('.input-pessoa'))
-      .map(input => input.value.trim())
-      .filter(valor => valor.length > 0);
+    return Array.from(document.getElementById(idContainer).querySelectorAll('.campo-pessoa'))
+      .map(linha => linha.dataset.nomeConfirmado)
+      .filter(nome => nome && nome.length > 0);
   }
 
   async function abrirFormularioChecklist(templateId, tituloChecklist, areaId, auditores, auditados) {
@@ -1070,8 +1119,6 @@
         <label class="block text-sm font-semibold text-gray-700 mb-1">Tipo</label>
         <select id="select-area-tipo" class="w-full border border-gray-300 rounded-lg p-2.5 mb-3">
           <option value="Unidade">Unidade</option>
-          <option value="Diretoria">Diretoria</option>
-          <option value="Gerencia">Gerência</option>
           <option value="Area" selected>Área</option>
           <option value="Subarea">Subárea</option>
         </select>
