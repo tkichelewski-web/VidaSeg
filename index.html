@@ -193,7 +193,196 @@
   // de um parâmetro (qual checklist foi clicado) — por isso é chamada
   // diretamente pelo clique no cartão, e não pelo menu lateral.
   // ------------------------------------------------------------
-  async function abrirFormularioChecklist(templateId, tituloChecklist) {
+  // ------------------------------------------------------------
+  // TELA DE IDENTIFICAÇÃO — primeira etapa ao abrir um checklist.
+  // Coleta: Unidade, Local (Área), Auditores e Auditados, antes
+  // de mostrar qualquer pergunta. Isso evita que o auditor esqueça
+  // de preencher algo importante no meio do processo.
+  // ------------------------------------------------------------
+  async function abrirTelaIdentificacao(templateId, tituloChecklist) {
+    conteudoApp.innerHTML = `<p class="text-gray-400">Carregando...</p>`;
+
+    const { data: areasDisponiveis } = await supabaseClient
+      .from('unidades_areas')
+      .select('id, nome, tipo, unidade_sigla, area_pai_id')
+      .eq('ativo', true)
+      .order('nome', { ascending: true });
+
+    conteudoApp.innerHTML = `
+      <button id="btn-voltar-lista-ident" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para lista</button>
+      <h2 class="text-2xl font-bold text-marca-jb mb-1">Identificação da Auditoria</h2>
+      <p class="text-gray-500 text-sm mb-4">${tituloChecklist}</p>
+
+      <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Unidade</label>
+        <select id="select-unidade-ident" class="w-full border border-gray-300 rounded-lg p-2.5 mb-4">
+          <option value="">— Selecione a unidade —</option>
+          <option value="JB">JB (Jaboticabal)</option>
+          <option value="PB">PB (Pereira Barreto)</option>
+        </select>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Local da Inspeção</label>
+        <input type="hidden" id="input-area-inspecao-id" value="">
+        <button id="btn-abrir-seletor-area" type="button" disabled
+          class="w-full text-left border border-gray-300 rounded-lg p-3 flex justify-between items-center bg-gray-100 text-gray-400 cursor-not-allowed">
+          <span id="texto-area-selecionada">Selecione a unidade primeiro</span>
+          <span>&rsaquo;</span>
+        </button>
+      </div>
+
+      <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-2">Auditor(es)</label>
+        <div id="lista-campos-auditores"></div>
+        <button id="btn-add-auditor" type="button" class="text-marca-jb text-sm font-semibold hover:underline mt-1">+ Adicionar auditor</button>
+      </div>
+
+      <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-2">Auditado(s)</label>
+        <div id="lista-campos-auditados"></div>
+        <button id="btn-add-auditado" type="button" class="text-marca-jb text-sm font-semibold hover:underline mt-1">+ Adicionar auditado</button>
+      </div>
+
+      <div id="aviso-identificacao" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mb-4"></div>
+
+      <button id="btn-avancar-identificacao"
+        class="w-full bg-marca-jb text-white font-semibold py-3 rounded-lg hover:bg-marca-jb/90 transition">
+        Avançar &rarr;
+      </button>
+
+      <!-- Painel de seleção de área (mesma "gaveta" que já usamos antes) -->
+      <div id="painel-seletor-area" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center">
+        <div class="bg-white w-full md:max-w-md md:rounded-xl rounded-t-xl max-h-[80vh] flex flex-col">
+          <div class="p-4 border-b border-gray-200 flex justify-between items-center shrink-0">
+            <h3 class="font-bold text-marca-jb">Selecione o local da inspeção</h3>
+            <button id="btn-fechar-seletor-area" class="text-gray-400 text-xl leading-none">&times;</button>
+          </div>
+          <div id="conteudo-seletor-area" class="overflow-y-auto p-2"></div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-voltar-lista-ident').addEventListener('click', () => {
+      navegarPara('nova-auditoria');
+    });
+
+    // Adiciona o 1º campo de auditor e de auditado, já abertos por padrão
+    adicionarCampoPessoa('lista-campos-auditores', 'auditor');
+    adicionarCampoPessoa('lista-campos-auditados', 'auditado');
+
+    document.getElementById('btn-add-auditor').addEventListener('click', () => {
+      adicionarCampoPessoa('lista-campos-auditores', 'auditor');
+    });
+    document.getElementById('btn-add-auditado').addEventListener('click', () => {
+      adicionarCampoPessoa('lista-campos-auditados', 'auditado');
+    });
+
+    // Quando a Unidade é escolhida: filtra as áreas daquela unidade
+    // e libera o botão do seletor de local (antes travado).
+    document.getElementById('select-unidade-ident').addEventListener('change', (evento) => {
+      const unidadeEscolhida = evento.target.value;
+      const botaoArea = document.getElementById('btn-abrir-seletor-area');
+      const textoArea = document.getElementById('texto-area-selecionada');
+
+      // Zera a área escolhida anteriormente, pois mudou a unidade
+      document.getElementById('input-area-inspecao-id').value = '';
+
+      if (!unidadeEscolhida) {
+        botaoArea.disabled = true;
+        botaoArea.classList.add('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+        textoArea.textContent = 'Selecione a unidade primeiro';
+        return;
+      }
+
+      // Filtra só as áreas daquela unidade, ANTES de montar a árvore
+      const areasDaUnidade = areasDisponiveis.filter(a => a.unidade_sigla === unidadeEscolhida);
+      const arvoreFiltrada = construirArvoreAreas(areasDaUnidade);
+      document.getElementById('conteudo-seletor-area').innerHTML = desenharArvoreSelecionavel(arvoreFiltrada);
+
+      // Liga o clique em cada área recém-desenhada
+      document.querySelectorAll('.item-area-selecionavel').forEach(item => {
+        item.addEventListener('click', () => {
+          document.getElementById('input-area-inspecao-id').value = item.dataset.id;
+          textoArea.textContent = item.dataset.nome;
+          textoArea.classList.remove('text-gray-400');
+          textoArea.classList.add('text-gray-800', 'font-semibold');
+          document.getElementById('painel-seletor-area').classList.add('hidden');
+        });
+      });
+
+      botaoArea.disabled = false;
+      botaoArea.classList.remove('bg-gray-100', 'text-gray-400', 'cursor-not-allowed');
+      botaoArea.classList.add('bg-gray-50', 'text-gray-800');
+      textoArea.textContent = 'Toque para selecionar a área';
+      textoArea.classList.remove('text-gray-800', 'font-semibold');
+      textoArea.classList.add('text-gray-500');
+    });
+
+    document.getElementById('btn-abrir-seletor-area').addEventListener('click', () => {
+      document.getElementById('painel-seletor-area').classList.remove('hidden');
+    });
+    document.getElementById('btn-fechar-seletor-area').addEventListener('click', () => {
+      document.getElementById('painel-seletor-area').classList.add('hidden');
+    });
+
+    // Botão "Avançar": valida o essencial e segue pro formulário de perguntas
+    document.getElementById('btn-avancar-identificacao').addEventListener('click', () => {
+      const avisoEl = document.getElementById('aviso-identificacao');
+      const areaId = document.getElementById('input-area-inspecao-id').value;
+      const auditores = coletarValoresPessoa('lista-campos-auditores');
+      const auditados = coletarValoresPessoa('lista-campos-auditados');
+      const pendencias = [];
+
+      if (!areaId) pendencias.push('Selecione a unidade e o local da inspeção.');
+      if (auditores.length === 0) pendencias.push('Informe ao menos um auditor.');
+
+      if (pendencias.length > 0) {
+        avisoEl.innerHTML = `<strong>Antes de continuar, resolva:</strong><br>${pendencias.join('<br>')}`;
+        avisoEl.classList.remove('hidden');
+        avisoEl.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+
+      avisoEl.classList.add('hidden');
+      abrirFormularioChecklist(templateId, tituloChecklist, areaId, auditores, auditados);
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Adiciona uma linha de "campo de nome + botão remover (×)"
+  // dentro do container indicado (lista de auditores ou auditados).
+  // ------------------------------------------------------------
+  function adicionarCampoPessoa(idContainer, tipoRotulo) {
+    const container = document.getElementById(idContainer);
+    const linha = document.createElement('div');
+    linha.className = 'flex gap-2 mb-2 campo-pessoa';
+    linha.innerHTML = `
+      <input type="text" placeholder="Nome do ${tipoRotulo}"
+        class="input-pessoa flex-1 border border-gray-300 rounded-lg p-2.5">
+      <button type="button" class="btn-remover-pessoa text-gray-400 hover:text-red-600 px-2" title="Remover">&times;</button>
+    `;
+    container.appendChild(linha);
+
+    linha.querySelector('.btn-remover-pessoa').addEventListener('click', () => {
+      // Nunca deixa remover a última linha — sempre sobra pelo menos 1 campo
+      if (container.querySelectorAll('.campo-pessoa').length > 1) {
+        linha.remove();
+      } else {
+        linha.querySelector('.input-pessoa').value = '';
+      }
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Lê todos os campos de nome preenchidos dentro de um container,
+  // ignorando os que ficaram em branco, e devolve uma lista simples.
+  // ------------------------------------------------------------
+  function coletarValoresPessoa(idContainer) {
+    return Array.from(document.getElementById(idContainer).querySelectorAll('.input-pessoa'))
+      .map(input => input.value.trim())
+      .filter(valor => valor.length > 0);
+  }
+
+  async function abrirFormularioChecklist(templateId, tituloChecklist, areaId, auditores, auditados) {
     // Zera o rascunho, pois é um checklist novo sendo aberto
     respostasEmAndamento = {};
     fotosEmAndamento = {};
@@ -221,16 +410,6 @@
       `;
       return;
     }
-
-    // Busca também as áreas cadastradas, pra montar o seletor de
-    // "Local da Inspeção" no topo do formulário.
-    const { data: areasDisponiveis } = await supabaseClient
-      .from('unidades_areas')
-      .select('id, nome, tipo, unidade_sigla, area_pai_id')
-      .eq('ativo', true)
-      .order('nome', { ascending: true });
-
-    const arvoreAreas = construirArvoreAreas(areasDisponiveis || []);
 
     // Monta o HTML de cada pergunta, com seus 3 botões de resposta
     const perguntasHtml = perguntas.map((p, index) => `
@@ -271,20 +450,6 @@
       <button id="btn-voltar-lista" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para lista</button>
       <h2 class="text-2xl font-bold text-marca-jb mb-4">${tituloChecklist}</h2>
 
-      <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
-        <label class="block text-sm font-semibold text-gray-700 mb-1">Local da Inspeção</label>
-
-        <!-- Campo escondido: guarda o ID de verdade da área escolhida -->
-        <input type="hidden" id="input-area-inspecao-id" value="">
-
-        <!-- Botão que o auditor toca: abre o painel de seleção -->
-        <button id="btn-abrir-seletor-area" type="button"
-          class="w-full text-left border border-gray-300 rounded-lg p-3 flex justify-between items-center bg-gray-50">
-          <span id="texto-area-selecionada" class="text-gray-500">Toque para selecionar a área</span>
-          <span class="text-gray-400">&rsaquo;</span>
-        </button>
-      </div>
-
       <div id="lista-perguntas">${perguntasHtml}</div>
 
       <div id="aviso-validacao" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mt-4"></div>
@@ -293,65 +458,19 @@
         class="mt-4 w-full bg-marca-jb text-white font-semibold py-3 rounded-lg hover:bg-marca-jb/90 transition">
         Finalizar Auditoria &rarr;
       </button>
-
-      <!-- ============================================================
-           PAINEL DE SELEÇÃO DE ÁREA — some por padrão (classe hidden).
-           Cobre a tela inteira, facilitando o toque no celular.
-      ============================================================= -->
-      <div id="painel-seletor-area" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center">
-        <div class="bg-white w-full md:max-w-md md:rounded-xl rounded-t-xl max-h-[80vh] flex flex-col">
-          <div class="p-4 border-b border-gray-200 flex justify-between items-center shrink-0">
-            <h3 class="font-bold text-marca-jb">Selecione o local da inspeção</h3>
-            <button id="btn-fechar-seletor-area" class="text-gray-400 text-xl leading-none">&times;</button>
-          </div>
-          <div class="overflow-y-auto p-2">
-            ${desenharArvoreSelecionavel(arvoreAreas)}
-          </div>
-        </div>
-      </div>
     `;
 
-    // Botão "Voltar": recarrega a lista de checklists
+    // Botão "Voltar": volta para a Tela de Identificação (não a lista
+    // inteira), já que templateId e tituloChecklist a gente já tem em mãos.
     document.getElementById('btn-voltar-lista').addEventListener('click', () => {
-      navegarPara('nova-auditoria');
-    });
-
-    // Abre o painel de seleção de área ao tocar no botão
-    document.getElementById('btn-abrir-seletor-area').addEventListener('click', () => {
-      document.getElementById('painel-seletor-area').classList.remove('hidden');
-    });
-
-    // Fecha o painel sem escolher nada (botão "X")
-    document.getElementById('btn-fechar-seletor-area').addEventListener('click', () => {
-      document.getElementById('painel-seletor-area').classList.add('hidden');
-    });
-
-    // Clique em qualquer área da lista: guarda o id escolhido no campo
-    // escondido, atualiza o texto do botão e fecha o painel.
-    document.querySelectorAll('.item-area-selecionavel').forEach(item => {
-      item.addEventListener('click', () => {
-        document.getElementById('input-area-inspecao-id').value = item.dataset.id;
-
-        const textoEl = document.getElementById('texto-area-selecionada');
-        textoEl.textContent = item.dataset.nome;
-        textoEl.classList.remove('text-gray-500');
-        textoEl.classList.add('text-gray-800', 'font-semibold');
-
-        document.getElementById('painel-seletor-area').classList.add('hidden');
-      });
+      abrirTelaIdentificacao(templateId, tituloChecklist);
     });
 
     // Botão "Finalizar Auditoria": confere se está tudo respondido
     // antes de deixar o auditor avançar para a tela de assinatura.
     document.getElementById('btn-finalizar-auditoria').addEventListener('click', () => {
       const avisoEl = document.getElementById('aviso-validacao');
-      const areaSelecionadaId = document.getElementById('input-area-inspecao-id').value;
       const pendencias = [];
-
-      // Área é o primeiro item a conferir: sem local, a auditoria não faz sentido
-      if (!areaSelecionadaId) {
-        pendencias.push('Selecione o local (área) da inspeção.');
-      }
 
       perguntas.forEach((p, index) => {
         // Falta responder essa pergunta?
@@ -372,7 +491,7 @@
       }
 
       avisoEl.classList.add('hidden');
-      abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaSelecionadaId);
+      abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId, auditores, auditados);
     });
 
     // Liga um "escutador" em cada campo de foto.
@@ -454,17 +573,18 @@
   // Monta a tela de assinatura digital do auditor, usando um
   // <canvas> HTML5 como "quadro de desenho".
   // ------------------------------------------------------------
-  function abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId) {
+  function abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId, auditores, auditados) {
     assinaturaAuditorBase64 = null; // zera assinatura anterior, se houver
 
     conteudoApp.innerHTML = `
       <button id="btn-voltar-formulario" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para as perguntas</button>
-      <h2 class="text-2xl font-bold text-marca-jb mb-1">Assinatura do Auditor</h2>
+      <h2 class="text-2xl font-bold text-marca-jb mb-1">Assinatura</h2>
       <p class="text-gray-500 text-sm mb-4">Assine no quadro abaixo com o dedo ou o mouse para concluir "${tituloChecklist}".</p>
 
-      <label class="block text-sm font-semibold text-gray-700 mb-1">Nome do Auditor</label>
-      <input id="input-nome-auditor" type="text" placeholder="Digite seu nome completo"
-        class="w-full border border-gray-300 rounded-lg p-3 mb-4 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+      <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4 text-sm">
+        <p><span class="font-semibold text-gray-700">Auditor(es):</span> ${auditores.join(', ')}</p>
+        ${auditados.length > 0 ? `<p class="mt-1"><span class="font-semibold text-gray-700">Auditado(s):</span> ${auditados.join(', ')}</p>` : ''}
+      </div>
 
       <div class="bg-white border-2 border-dashed border-gray-300 rounded-lg overflow-hidden">
         <canvas id="canvas-assinatura" class="w-full touch-none" height="220"></canvas>
@@ -485,7 +605,7 @@
     `;
 
     document.getElementById('btn-voltar-formulario').addEventListener('click', () => {
-      abrirFormularioChecklist(templateId, tituloChecklist);
+      abrirFormularioChecklist(templateId, tituloChecklist, areaId, auditores, auditados);
     });
 
     // --- Configuração do Canvas ---
@@ -535,16 +655,8 @@
     // Botão "Confirmar": converte o desenho em texto base64 e salva tudo
     document.getElementById('btn-confirmar-assinatura').addEventListener('click', async () => {
       const avisoEl = document.getElementById('aviso-assinatura');
-      const nomeAuditor = document.getElementById('input-nome-auditor').value.trim();
 
-      // Validação 1: nome do auditor é obrigatório
-      if (!nomeAuditor) {
-        avisoEl.textContent = 'Por favor, informe o nome do auditor.';
-        avisoEl.classList.remove('hidden');
-        return;
-      }
-
-      // Validação 2: verifica se o canvas está realmente em branco
+      // Validação: verifica se o canvas está realmente em branco
       const canvasVazio = document.createElement('canvas');
       canvasVazio.width = canvas.width;
       canvasVazio.height = canvas.height;
@@ -570,13 +682,18 @@
         // PASSO 1: cria o "cabeçalho" da auditoria em inspecoes_executadas.
         // O .select() no final pede pro Supabase devolver a linha criada,
         // pra gente pegar o "id" dela e usar no Passo 2.
+        // nome_auditor (texto único) guarda os nomes juntos, por
+        // compatibilidade; nomes_auditores/nomes_auditados guardam a
+        // lista de verdade, cada nome separado.
         // ------------------------------------------------------------
         const { data: inspecaoCriada, error: erroInspecao } = await supabaseClient
           .from('inspecoes_executadas')
           .insert({
             template_id: templateId,
             area_id: areaId,
-            nome_auditor: nomeAuditor,
+            nome_auditor: auditores.join(', '),
+            nomes_auditores: auditores,
+            nomes_auditados: auditados,
             assinatura_auditor_base64: assinaturaAuditorBase64,
             status: 'finalizada',
             data_hora_fim: new Date().toISOString()
@@ -627,7 +744,7 @@
           <div class="text-center py-16">
             <div class="text-5xl mb-4">✅</div>
             <h2 class="text-2xl font-bold text-marca-jb mb-2">Auditoria salva com sucesso!</h2>
-            <p class="text-gray-500 mb-6">"${tituloChecklist}" foi registrada por ${nomeAuditor}.</p>
+            <p class="text-gray-500 mb-6">"${tituloChecklist}" foi registrada por ${auditores.join(', ')}.</p>
             <button id="btn-nova-auditoria-final" class="bg-marca-jb text-white font-semibold px-6 py-3 rounded-lg hover:bg-marca-jb/90">
               Iniciar Nova Auditoria
             </button>
@@ -888,7 +1005,7 @@
       //    o id e o título guardados no data-id / data-titulo.
       document.querySelectorAll('.card-checklist').forEach(cartao => {
         cartao.addEventListener('click', () => {
-          abrirFormularioChecklist(cartao.dataset.id, cartao.dataset.titulo);
+          abrirTelaIdentificacao(cartao.dataset.id, cartao.dataset.titulo);
         });
       });
     },
