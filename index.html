@@ -94,6 +94,9 @@
       <button data-rota="areas" class="menu-item w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
         <span>🗺️</span> Áreas
       </button>
+      <button data-rota="admin-checklists" class="menu-item w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
+        <span>🛠️</span> Checklists
+      </button>
     </nav>
 
     <!-- Rodapé da sidebar -->
@@ -734,6 +737,7 @@
       <p class="text-gray-500">Aqui vão entrar os planos 5W2H.</p>
     `,
     areas: () => renderizarTelaAreas(),
+    'admin-checklists': () => renderizarTelaAdminChecklists(),
   };
 
   // ------------------------------------------------------------
@@ -824,6 +828,127 @@
     `;
 
     ligarEventosTelaAreas();
+  }
+
+  // ------------------------------------------------------------
+  // Busca os checklists cadastrados, desenha a lista e o formulário
+  // de "+ Novo Checklist". Mesmo padrão usado em renderizarTelaAreas().
+  // ------------------------------------------------------------
+  async function renderizarTelaAdminChecklists() {
+    conteudoApp.innerHTML = `
+      <h2 class="text-2xl font-bold text-marca-jb mb-2">Checklists</h2>
+      <p class="text-gray-400">Carregando checklists cadastrados...</p>
+    `;
+
+    const { data: checklists, error } = await supabaseClient
+      .from('checklists_templates')
+      .select('id, titulo, setor, norma_procedimento_base')
+      .eq('ativo', true)
+      .order('titulo', { ascending: true });
+
+    if (error) {
+      conteudoApp.innerHTML = `<p class="text-red-600">Erro ao carregar checklists: ${error.message}</p>`;
+      return;
+    }
+
+    const listaHtml = (checklists && checklists.length > 0)
+      ? checklists.map(c => `
+          <div class="card-admin-checklist bg-white border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-center hover:border-marca-lima transition cursor-pointer"
+               data-id="${c.id}" data-titulo="${c.titulo}">
+            <div>
+              <h3 class="font-bold text-marca-jb">${c.titulo}</h3>
+              <p class="text-sm text-gray-500">Setor: ${c.setor || '—'} · ${c.norma_procedimento_base || 'sem norma vinculada'}</p>
+            </div>
+            <span class="text-marca-jb text-sm font-semibold">Gerenciar perguntas &rarr;</span>
+          </div>
+        `).join('')
+      : `<p class="text-gray-500">Nenhum checklist cadastrado ainda.</p>`;
+
+    conteudoApp.innerHTML = `
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-2xl font-bold text-marca-jb">Checklists</h2>
+        <button id="btn-abrir-form-checklist" class="bg-marca-jb text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-marca-jb/90">
+          + Novo Checklist
+        </button>
+      </div>
+      <p class="text-gray-500 mb-4">Clique em um checklist para gerenciar suas perguntas.</p>
+
+      <div id="painel-form-checklist" class="hidden bg-white border border-gray-200 rounded-lg p-5 mb-4">
+        <h3 class="font-bold text-marca-jb mb-3">Cadastrar novo checklist</h3>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Título</label>
+        <input id="input-checklist-titulo" type="text" placeholder="Ex: Inspeção de Máquinas e Equipamentos"
+          class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Setor</label>
+        <input id="input-checklist-setor" type="text" placeholder="Ex: Mecânica, Agrícola, Frota"
+          class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Norma / Procedimento base</label>
+        <input id="input-checklist-norma" type="text" placeholder="Ex: NR-12 ou Procedimento Interno PRC-045"
+          class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+
+        <div id="aviso-form-checklist" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mb-3"></div>
+
+        <div class="flex gap-2">
+          <button id="btn-salvar-checklist" class="bg-marca-lima text-marca-jb font-bold px-4 py-2 rounded-lg hover:opacity-90">
+            Salvar Checklist
+          </button>
+          <button id="btn-cancelar-checklist" class="text-gray-500 text-sm px-4 py-2 hover:underline">
+            Cancelar
+          </button>
+        </div>
+      </div>
+
+      <div>${listaHtml}</div>
+    `;
+
+    ligarEventosTelaAdminChecklists();
+  }
+
+  // ------------------------------------------------------------
+  // Liga os cliques da tela de administração de Checklists:
+  // abrir/cancelar o formulário, salvar um checklist novo, e
+  // (no próximo bloco) clicar num cartão pra gerenciar as perguntas.
+  // ------------------------------------------------------------
+  function ligarEventosTelaAdminChecklists() {
+    const painel = document.getElementById('painel-form-checklist');
+
+    document.getElementById('btn-abrir-form-checklist').addEventListener('click', () => {
+      painel.classList.remove('hidden');
+    });
+
+    document.getElementById('btn-cancelar-checklist').addEventListener('click', () => {
+      painel.classList.add('hidden');
+    });
+
+    document.getElementById('btn-salvar-checklist').addEventListener('click', async () => {
+      const titulo = document.getElementById('input-checklist-titulo').value.trim();
+      const setor = document.getElementById('input-checklist-setor').value.trim() || null;
+      const norma = document.getElementById('input-checklist-norma').value.trim() || null;
+      const avisoEl = document.getElementById('aviso-form-checklist');
+
+      if (!titulo) {
+        avisoEl.textContent = 'Por favor, preencha o título do checklist.';
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      const { error } = await supabaseClient
+        .from('checklists_templates')
+        .insert({ titulo: titulo, setor: setor, norma_procedimento_base: norma });
+
+      if (error) {
+        avisoEl.textContent = `Erro ao salvar: ${error.message}`;
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      renderizarTelaAdminChecklists();
+    });
+
+    // Clique num cartão: essa parte ainda não faz nada — no próximo
+    // bloco, vamos conectá-la à tela de gerenciamento de perguntas.
   }
 
   // ------------------------------------------------------------
