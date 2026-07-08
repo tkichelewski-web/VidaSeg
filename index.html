@@ -91,6 +91,9 @@
       <button data-rota="planos-acao" class="menu-item w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
         <span>✅</span> Planos de Ação
       </button>
+      <button data-rota="areas" class="menu-item w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
+        <span>🗺️</span> Áreas
+      </button>
     </nav>
 
     <!-- Rodapé da sidebar -->
@@ -523,6 +526,48 @@
   }
 
   // ------------------------------------------------------------
+  // Recebe a lista "plana" de áreas (do jeito que vem do banco) e
+  // reorganiza em uma árvore: cada área ganha uma lista "filhos"
+  // com as áreas que apontam pra ela através de area_pai_id.
+  // ------------------------------------------------------------
+  function construirArvoreAreas(listaPlana) {
+    const mapaPorId = {};
+    listaPlana.forEach(area => {
+      mapaPorId[area.id] = { ...area, filhos: [] };
+    });
+
+    const raizes = []; // áreas sem pai (ex: as Unidades JB e PB)
+
+    listaPlana.forEach(area => {
+      if (area.area_pai_id && mapaPorId[area.area_pai_id]) {
+        // Essa área tem pai: encaixa ela na lista "filhos" do pai
+        mapaPorId[area.area_pai_id].filhos.push(mapaPorId[area.id]);
+      } else {
+        // Sem pai: é uma área de topo (raiz da árvore)
+        raizes.push(mapaPorId[area.id]);
+      }
+    });
+
+    return raizes;
+  }
+
+  // ------------------------------------------------------------
+  // Desenha a árvore em HTML, chamando a si mesma para cada nível
+  // de "filhos" (isso se chama recursão: a função se usa de novo
+  // pra resolver o mesmo problema em uma escala menor).
+  // ------------------------------------------------------------
+  function desenharArvoreHtml(nos, profundidade = 0) {
+    return nos.map(no => `
+      <div style="margin-left: ${profundidade * 24}px" class="py-2 border-b border-gray-100">
+        <span class="font-semibold text-gray-800">${no.nome}</span>
+        <span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded ml-2">${no.tipo}</span>
+        ${no.unidade_sigla ? `<span class="text-xs bg-marca-lima/30 text-marca-jb px-2 py-0.5 rounded ml-1">${no.unidade_sigla}</span>` : ''}
+      </div>
+      ${no.filhos.length > 0 ? desenharArvoreHtml(no.filhos, profundidade + 1) : ''}
+    `).join('');
+  }
+
+  // ------------------------------------------------------------
   // "MAPA DE ROTAS": cada tela é uma função que devolve um pedaço de HTML.
   // Por enquanto são só telas de exemplo (placeholders).
   // Nos próximos passos, vamos preencher cada uma de verdade.
@@ -600,6 +645,42 @@
       <h2 class="text-2xl font-bold text-marca-jb mb-2">Planos de Ação</h2>
       <p class="text-gray-500">Aqui vão entrar os planos 5W2H.</p>
     `,
+    areas: async () => {
+      conteudoApp.innerHTML = `
+        <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
+        <p class="text-gray-400">Carregando estrutura de áreas...</p>
+      `;
+
+      const { data: areas, error } = await supabaseClient
+        .from('unidades_areas')
+        .select('id, nome, tipo, unidade_sigla, area_pai_id')
+        .eq('ativo', true)
+        .order('nome', { ascending: true });
+
+      if (error) {
+        conteudoApp.innerHTML = `<p class="text-red-600">Erro ao carregar áreas: ${error.message}</p>`;
+        return;
+      }
+
+      if (!areas || areas.length === 0) {
+        conteudoApp.innerHTML = `
+          <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
+          <p class="text-gray-500">Nenhuma área cadastrada ainda.</p>
+        `;
+        return;
+      }
+
+      const arvore = construirArvoreAreas(areas);
+      const arvoreHtml = desenharArvoreHtml(arvore);
+
+      conteudoApp.innerHTML = `
+        <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
+        <p class="text-gray-500 mb-4">Estrutura hierárquica de locais da usina.</p>
+        <div class="bg-white border border-gray-200 rounded-lg p-5">
+          ${arvoreHtml}
+        </div>
+      `;
+    },
   };
 
   // ------------------------------------------------------------
