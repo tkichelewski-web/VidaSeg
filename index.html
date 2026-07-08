@@ -139,6 +139,24 @@
   let assinaturaAuditorBase64 = null;
 
   // ------------------------------------------------------------
+  // Monta a árvore de áreas como uma lista de itens CLICÁVEIS,
+  // usada dentro do painel de seleção de "Local da Inspeção".
+  // Cada nível tem mais recuo (padding), deixando a hierarquia clara.
+  // ------------------------------------------------------------
+  function desenharArvoreSelecionavel(nos, profundidade = 0) {
+    return nos.map(no => `
+      <div class="item-area-selecionavel px-3 py-3 rounded-lg hover:bg-gray-50 cursor-pointer flex items-center gap-2 active:bg-marca-lima/20"
+           style="margin-left: ${profundidade * 18}px"
+           data-id="${no.id}" data-nome="${no.nome}">
+        <span class="text-gray-800 ${no.filhos.length === 0 ? 'font-semibold' : ''}">${no.nome}</span>
+        <span class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">${no.tipo}</span>
+        ${no.unidade_sigla ? `<span class="text-xs bg-marca-lima/30 text-marca-jb px-2 py-0.5 rounded">${no.unidade_sigla}</span>` : ''}
+      </div>
+      ${no.filhos.length > 0 ? desenharArvoreSelecionavel(no.filhos, profundidade + 1) : ''}
+    `).join('');
+  }
+
+  // ------------------------------------------------------------
   // Busca as perguntas de UM checklist específico e monta o formulário.
   // Essa função não faz parte do "mapa de rotas" porque ela precisa
   // de um parâmetro (qual checklist foi clicado) — por isso é chamada
@@ -182,7 +200,6 @@
       .order('nome', { ascending: true });
 
     const arvoreAreas = construirArvoreAreas(areasDisponiveis || []);
-    const opcoesAreaHtml = montarOpcoesSelectPai(arvoreAreas);
 
     // Monta o HTML de cada pergunta, com seus 3 botões de resposta
     const perguntasHtml = perguntas.map((p, index) => `
@@ -225,10 +242,16 @@
 
       <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
         <label class="block text-sm font-semibold text-gray-700 mb-1">Local da Inspeção</label>
-        <select id="select-area-inspecao" class="w-full border border-gray-300 rounded-lg p-2.5">
-          <option value="">— Selecione a área —</option>
-          ${opcoesAreaHtml}
-        </select>
+
+        <!-- Campo escondido: guarda o ID de verdade da área escolhida -->
+        <input type="hidden" id="input-area-inspecao-id" value="">
+
+        <!-- Botão que o auditor toca: abre o painel de seleção -->
+        <button id="btn-abrir-seletor-area" type="button"
+          class="w-full text-left border border-gray-300 rounded-lg p-3 flex justify-between items-center bg-gray-50">
+          <span id="texto-area-selecionada" class="text-gray-500">Toque para selecionar a área</span>
+          <span class="text-gray-400">&rsaquo;</span>
+        </button>
       </div>
 
       <div id="lista-perguntas">${perguntasHtml}</div>
@@ -239,6 +262,22 @@
         class="mt-4 w-full bg-marca-jb text-white font-semibold py-3 rounded-lg hover:bg-marca-jb/90 transition">
         Finalizar Auditoria &rarr;
       </button>
+
+      <!-- ============================================================
+           PAINEL DE SELEÇÃO DE ÁREA — some por padrão (classe hidden).
+           Cobre a tela inteira, facilitando o toque no celular.
+      ============================================================= -->
+      <div id="painel-seletor-area" class="hidden fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center">
+        <div class="bg-white w-full md:max-w-md md:rounded-xl rounded-t-xl max-h-[80vh] flex flex-col">
+          <div class="p-4 border-b border-gray-200 flex justify-between items-center shrink-0">
+            <h3 class="font-bold text-marca-jb">Selecione o local da inspeção</h3>
+            <button id="btn-fechar-seletor-area" class="text-gray-400 text-xl leading-none">&times;</button>
+          </div>
+          <div class="overflow-y-auto p-2">
+            ${desenharArvoreSelecionavel(arvoreAreas)}
+          </div>
+        </div>
+      </div>
     `;
 
     // Botão "Voltar": recarrega a lista de checklists
@@ -246,11 +285,36 @@
       navegarPara('nova-auditoria');
     });
 
+    // Abre o painel de seleção de área ao tocar no botão
+    document.getElementById('btn-abrir-seletor-area').addEventListener('click', () => {
+      document.getElementById('painel-seletor-area').classList.remove('hidden');
+    });
+
+    // Fecha o painel sem escolher nada (botão "X")
+    document.getElementById('btn-fechar-seletor-area').addEventListener('click', () => {
+      document.getElementById('painel-seletor-area').classList.add('hidden');
+    });
+
+    // Clique em qualquer área da lista: guarda o id escolhido no campo
+    // escondido, atualiza o texto do botão e fecha o painel.
+    document.querySelectorAll('.item-area-selecionavel').forEach(item => {
+      item.addEventListener('click', () => {
+        document.getElementById('input-area-inspecao-id').value = item.dataset.id;
+
+        const textoEl = document.getElementById('texto-area-selecionada');
+        textoEl.textContent = item.dataset.nome;
+        textoEl.classList.remove('text-gray-500');
+        textoEl.classList.add('text-gray-800', 'font-semibold');
+
+        document.getElementById('painel-seletor-area').classList.add('hidden');
+      });
+    });
+
     // Botão "Finalizar Auditoria": confere se está tudo respondido
     // antes de deixar o auditor avançar para a tela de assinatura.
     document.getElementById('btn-finalizar-auditoria').addEventListener('click', () => {
       const avisoEl = document.getElementById('aviso-validacao');
-      const areaSelecionadaId = document.getElementById('select-area-inspecao').value;
+      const areaSelecionadaId = document.getElementById('input-area-inspecao-id').value;
       const pendencias = [];
 
       // Área é o primeiro item a conferir: sem local, a auditoria não faz sentido
