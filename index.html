@@ -568,6 +568,67 @@
   }
 
   // ------------------------------------------------------------
+  // Monta as <option> do campo "Área Pai" do formulário, reaproveitando
+  // a mesma árvore da visualização — assim as opções também aparecem
+  // com recuo, ficando fácil ver em qual nível cada área está.
+  // ------------------------------------------------------------
+  function montarOpcoesSelectPai(nos, profundidade = 0) {
+    return nos.map(no => `
+      <option value="${no.id}">${'—'.repeat(profundidade)} ${no.nome}</option>
+      ${no.filhos.length > 0 ? montarOpcoesSelectPai(no.filhos, profundidade + 1) : ''}
+    `).join('');
+  }
+
+  // ------------------------------------------------------------
+  // Liga todos os cliques da tela de Áreas: abrir/cancelar o formulário
+  // e salvar uma área nova no banco.
+  // ------------------------------------------------------------
+  function ligarEventosTelaAreas() {
+    const painel = document.getElementById('painel-form-area');
+
+    document.getElementById('btn-abrir-form-area').addEventListener('click', () => {
+      painel.classList.remove('hidden');
+    });
+
+    document.getElementById('btn-cancelar-area').addEventListener('click', () => {
+      painel.classList.add('hidden');
+    });
+
+    document.getElementById('btn-salvar-area').addEventListener('click', async () => {
+      const nome = document.getElementById('input-area-nome').value.trim();
+      const tipo = document.getElementById('select-area-tipo').value;
+      const unidadeSigla = document.getElementById('select-area-unidade').value || null;
+      const areaPaiId = document.getElementById('select-area-pai').value || null;
+      const avisoEl = document.getElementById('aviso-form-area');
+
+      if (!nome) {
+        avisoEl.textContent = 'Por favor, preencha o nome da área.';
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      const { error } = await supabaseClient
+        .from('unidades_areas')
+        .insert({
+          nome: nome,
+          tipo: tipo,
+          unidade_sigla: unidadeSigla,
+          area_pai_id: areaPaiId
+        });
+
+      if (error) {
+        avisoEl.textContent = `Erro ao salvar: ${error.message}`;
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      // Sucesso: recarrega a tela inteira de Áreas, já mostrando
+      // a área nova na árvore e o formulário limpo de novo.
+      renderizarTelaAreas();
+    });
+  }
+
+  // ------------------------------------------------------------
   // "MAPA DE ROTAS": cada tela é uma função que devolve um pedaço de HTML.
   // Por enquanto são só telas de exemplo (placeholders).
   // Nos próximos passos, vamos preencher cada uma de verdade.
@@ -645,43 +706,98 @@
       <h2 class="text-2xl font-bold text-marca-jb mb-2">Planos de Ação</h2>
       <p class="text-gray-500">Aqui vão entrar os planos 5W2H.</p>
     `,
-    areas: async () => {
-      conteudoApp.innerHTML = `
-        <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
-        <p class="text-gray-400">Carregando estrutura de áreas...</p>
-      `;
-
-      const { data: areas, error } = await supabaseClient
-        .from('unidades_areas')
-        .select('id, nome, tipo, unidade_sigla, area_pai_id')
-        .eq('ativo', true)
-        .order('nome', { ascending: true });
-
-      if (error) {
-        conteudoApp.innerHTML = `<p class="text-red-600">Erro ao carregar áreas: ${error.message}</p>`;
-        return;
-      }
-
-      if (!areas || areas.length === 0) {
-        conteudoApp.innerHTML = `
-          <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
-          <p class="text-gray-500">Nenhuma área cadastrada ainda.</p>
-        `;
-        return;
-      }
-
-      const arvore = construirArvoreAreas(areas);
-      const arvoreHtml = desenharArvoreHtml(arvore);
-
-      conteudoApp.innerHTML = `
-        <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
-        <p class="text-gray-500 mb-4">Estrutura hierárquica de locais da usina.</p>
-        <div class="bg-white border border-gray-200 rounded-lg p-5">
-          ${arvoreHtml}
-        </div>
-      `;
-    },
+    areas: () => renderizarTelaAreas(),
   };
+
+  // ------------------------------------------------------------
+  // Busca as áreas no banco, desenha a árvore e o botão "+ Nova Área".
+  // Vira uma função própria (e não mais presa dentro do mapa de rotas)
+  // porque também vamos chamá-la de novo depois de cadastrar uma área,
+  // pra atualizar a tela sem precisar o usuário clicar no menu de novo.
+  // ------------------------------------------------------------
+  async function renderizarTelaAreas() {
+    conteudoApp.innerHTML = `
+      <h2 class="text-2xl font-bold text-marca-jb mb-2">Áreas</h2>
+      <p class="text-gray-400">Carregando estrutura de áreas...</p>
+    `;
+
+    const { data: areas, error } = await supabaseClient
+      .from('unidades_areas')
+      .select('id, nome, tipo, unidade_sigla, area_pai_id')
+      .eq('ativo', true)
+      .order('nome', { ascending: true });
+
+    if (error) {
+      conteudoApp.innerHTML = `<p class="text-red-600">Erro ao carregar áreas: ${error.message}</p>`;
+      return;
+    }
+
+    const arvore = construirArvoreAreas(areas || []);
+    const arvoreHtml = areas && areas.length > 0
+      ? desenharArvoreHtml(arvore)
+      : `<p class="text-gray-500">Nenhuma área cadastrada ainda.</p>`;
+
+    // Monta as opções do "Área Pai" do formulário, reaproveitando a árvore
+    // pra mostrar cada opção já com recuo (indentação) igual à visualização.
+    const opcoesAreaPai = montarOpcoesSelectPai(arvore);
+
+    conteudoApp.innerHTML = `
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-2xl font-bold text-marca-jb">Áreas</h2>
+        <button id="btn-abrir-form-area" class="bg-marca-jb text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-marca-jb/90">
+          + Nova Área
+        </button>
+      </div>
+      <p class="text-gray-500 mb-4">Estrutura hierárquica de locais da usina.</p>
+
+      <div id="painel-form-area" class="hidden bg-white border border-gray-200 rounded-lg p-5 mb-4">
+        <h3 class="font-bold text-marca-jb mb-3">Cadastrar nova área</h3>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Nome</label>
+        <input id="input-area-nome" type="text" placeholder="Ex: Moenda, Esteira 2, Pátio de Cana"
+          class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Tipo</label>
+        <select id="select-area-tipo" class="w-full border border-gray-300 rounded-lg p-2.5 mb-3">
+          <option value="Unidade">Unidade</option>
+          <option value="Diretoria">Diretoria</option>
+          <option value="Gerencia">Gerência</option>
+          <option value="Area" selected>Área</option>
+          <option value="Subarea">Subárea</option>
+        </select>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Unidade</label>
+        <select id="select-area-unidade" class="w-full border border-gray-300 rounded-lg p-2.5 mb-3">
+          <option value="">— Não se aplica —</option>
+          <option value="JB">JB (Jaboticabal)</option>
+          <option value="PB">PB (Pereira Barreto)</option>
+        </select>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Área Pai (onde essa área se encaixa)</label>
+        <select id="select-area-pai" class="w-full border border-gray-300 rounded-lg p-2.5 mb-3">
+          <option value="">— Nenhuma (esta é uma área de topo) —</option>
+          ${opcoesAreaPai}
+        </select>
+
+        <div id="aviso-form-area" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mb-3"></div>
+
+        <div class="flex gap-2">
+          <button id="btn-salvar-area" class="bg-marca-lima text-marca-jb font-bold px-4 py-2 rounded-lg hover:opacity-90">
+            Salvar Área
+          </button>
+          <button id="btn-cancelar-area" class="text-gray-500 text-sm px-4 py-2 hover:underline">
+            Cancelar
+          </button>
+        </div>
+      </div>
+
+      <div class="bg-white border border-gray-200 rounded-lg p-5">
+        ${arvoreHtml}
+      </div>
+    `;
+
+    ligarEventosTelaAreas();
+  }
 
   // ------------------------------------------------------------
   // Função que efetivamente troca a tela.
