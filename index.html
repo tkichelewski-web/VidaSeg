@@ -170,6 +170,17 @@
       return;
     }
 
+    // Busca também as áreas cadastradas, pra montar o seletor de
+    // "Local da Inspeção" no topo do formulário.
+    const { data: areasDisponiveis } = await supabaseClient
+      .from('unidades_areas')
+      .select('id, nome, tipo, unidade_sigla, area_pai_id')
+      .eq('ativo', true)
+      .order('nome', { ascending: true });
+
+    const arvoreAreas = construirArvoreAreas(areasDisponiveis || []);
+    const opcoesAreaHtml = montarOpcoesSelectPai(arvoreAreas);
+
     // Monta o HTML de cada pergunta, com seus 3 botões de resposta
     const perguntasHtml = perguntas.map((p, index) => `
       <div class="bg-white border border-gray-200 rounded-lg p-5 mb-3">
@@ -208,6 +219,15 @@
     conteudoApp.innerHTML = `
       <button id="btn-voltar-lista" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para lista</button>
       <h2 class="text-2xl font-bold text-marca-jb mb-4">${tituloChecklist}</h2>
+
+      <div class="bg-white border border-gray-200 rounded-lg p-4 mb-4">
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Local da Inspeção</label>
+        <select id="select-area-inspecao" class="w-full border border-gray-300 rounded-lg p-2.5">
+          <option value="">— Selecione a área —</option>
+          ${opcoesAreaHtml}
+        </select>
+      </div>
+
       <div id="lista-perguntas">${perguntasHtml}</div>
 
       <div id="aviso-validacao" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mt-4"></div>
@@ -227,7 +247,13 @@
     // antes de deixar o auditor avançar para a tela de assinatura.
     document.getElementById('btn-finalizar-auditoria').addEventListener('click', () => {
       const avisoEl = document.getElementById('aviso-validacao');
+      const areaSelecionadaId = document.getElementById('select-area-inspecao').value;
       const pendencias = [];
+
+      // Área é o primeiro item a conferir: sem local, a auditoria não faz sentido
+      if (!areaSelecionadaId) {
+        pendencias.push('Selecione o local (área) da inspeção.');
+      }
 
       perguntas.forEach((p, index) => {
         // Falta responder essa pergunta?
@@ -248,7 +274,7 @@
       }
 
       avisoEl.classList.add('hidden');
-      abrirTelaAssinatura(templateId, tituloChecklist, perguntas);
+      abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaSelecionadaId);
     });
 
     // Liga um "escutador" em cada campo de foto.
@@ -330,7 +356,7 @@
   // Monta a tela de assinatura digital do auditor, usando um
   // <canvas> HTML5 como "quadro de desenho".
   // ------------------------------------------------------------
-  function abrirTelaAssinatura(templateId, tituloChecklist, perguntas) {
+  function abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId) {
     assinaturaAuditorBase64 = null; // zera assinatura anterior, se houver
 
     conteudoApp.innerHTML = `
@@ -451,6 +477,7 @@
           .from('inspecoes_executadas')
           .insert({
             template_id: templateId,
+            area_id: areaId,
             nome_auditor: nomeAuditor,
             assinatura_auditor_base64: assinaturaAuditorBase64,
             status: 'finalizada',
