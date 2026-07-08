@@ -445,6 +445,7 @@
       .from('perguntas_template')
       .select('id, ordem, texto_pergunta, norma_regulamentadora_especifica, exige_foto')
       .eq('template_id', templateId)
+      .eq('ativo', true)
       .order('ordem', { ascending: true });
 
     if (error) {
@@ -1334,8 +1335,203 @@
       renderizarTelaAdminChecklists();
     });
 
-    // Clique num cartão: essa parte ainda não faz nada — no próximo
-    // bloco, vamos conectá-la à tela de gerenciamento de perguntas.
+    // Clique no corpo do cartão (fora dos botões de editar/excluir):
+    // abre a tela de gerenciamento de perguntas daquele checklist.
+    document.querySelectorAll('.card-admin-checklist').forEach(cartao => {
+      cartao.addEventListener('click', () => {
+        renderizarTelaGerenciarPerguntas(cartao.dataset.id, cartao.dataset.titulo);
+      });
+    });
+  }
+
+  // ------------------------------------------------------------
+  // Busca e lista as perguntas de UM checklist específico, com
+  // formulário de criar/editar/excluir. Mesmo padrão das outras
+  // telas de administração (Áreas, Checklists).
+  // ------------------------------------------------------------
+  async function renderizarTelaGerenciarPerguntas(checklistId, checklistTitulo) {
+    conteudoApp.innerHTML = `<p class="text-gray-400">Carregando perguntas...</p>`;
+
+    const { data: perguntas, error } = await supabaseClient
+      .from('perguntas_template')
+      .select('id, ordem, texto_pergunta, norma_regulamentadora_especifica, exige_foto')
+      .eq('template_id', checklistId)
+      .eq('ativo', true)
+      .order('ordem', { ascending: true });
+
+    if (error) {
+      conteudoApp.innerHTML = `<p class="text-red-600">Erro ao carregar perguntas: ${error.message}</p>`;
+      return;
+    }
+
+    const listaHtml = (perguntas && perguntas.length > 0)
+      ? perguntas.map((p, index) => `
+          <div class="bg-white border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-start">
+            <div class="flex-1">
+              <p class="font-semibold text-gray-800">${index + 1}. ${p.texto_pergunta}</p>
+              <p class="text-xs text-gray-400 mt-1">
+                ${p.norma_regulamentadora_especifica || 'sem norma vinculada'}
+                ${p.exige_foto ? ' · 📷 mostra opção de foto' : ''}
+              </p>
+            </div>
+            <div class="flex items-center gap-3 shrink-0 ml-3">
+              <button class="btn-editar-pergunta text-gray-400 hover:text-marca-jb text-lg"
+                data-id="${p.id}" data-ordem="${p.ordem}" data-texto="${p.texto_pergunta}"
+                data-norma="${p.norma_regulamentadora_especifica || ''}" data-foto="${p.exige_foto}"
+                title="Editar">✏️</button>
+              <button class="btn-excluir-pergunta text-gray-400 hover:text-red-600 text-lg"
+                data-id="${p.id}" data-texto="${p.texto_pergunta}"
+                title="Excluir">🗑️</button>
+            </div>
+          </div>
+        `).join('')
+      : `<p class="text-gray-500">Nenhuma pergunta cadastrada ainda neste checklist.</p>`;
+
+    // A próxima "ordem" sugerida é sempre a quantidade atual + 1
+    const proximaOrdem = (perguntas ? perguntas.length : 0) + 1;
+
+    conteudoApp.innerHTML = `
+      <button id="btn-voltar-checklists" class="text-sm text-marca-jb mb-4 hover:underline">&larr; Voltar para Checklists</button>
+
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-2xl font-bold text-marca-jb">${checklistTitulo}</h2>
+        <button id="btn-abrir-form-pergunta" class="bg-marca-jb text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-marca-jb/90">
+          + Nova Pergunta
+        </button>
+      </div>
+      <p class="text-gray-500 mb-4">Gerencie as perguntas deste checklist.</p>
+
+      <div id="painel-form-pergunta" class="hidden bg-white border border-gray-200 rounded-lg p-5 mb-4">
+        <h3 id="titulo-form-pergunta" class="font-bold text-marca-jb mb-3">Cadastrar nova pergunta</h3>
+
+        <input type="hidden" id="input-pergunta-id-edicao" value="">
+        <input type="hidden" id="input-pergunta-ordem" value="${proximaOrdem}">
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Texto da pergunta</label>
+        <textarea id="input-pergunta-texto" rows="2" placeholder="Ex: A máquina possui proteção fixa em partes móveis?"
+          class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima"></textarea>
+
+        <label class="block text-sm font-semibold text-gray-700 mb-1">Norma regulamentadora específica</label>
+        <input id="input-pergunta-norma" type="text" placeholder="Ex: NR-12.2.1"
+          class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
+
+        <label class="inline-flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3">
+          <input type="checkbox" id="input-pergunta-foto" class="w-4 h-4">
+          Mostrar opção de anexar foto nesta pergunta
+        </label>
+
+        <div id="aviso-form-pergunta" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mb-3"></div>
+
+        <div class="flex gap-2">
+          <button id="btn-salvar-pergunta" class="bg-marca-lima text-marca-jb font-bold px-4 py-2 rounded-lg hover:opacity-90">
+            Salvar Pergunta
+          </button>
+          <button id="btn-cancelar-pergunta" class="text-gray-500 text-sm px-4 py-2 hover:underline">
+            Cancelar
+          </button>
+        </div>
+      </div>
+
+      <div>${listaHtml}</div>
+    `;
+
+    document.getElementById('btn-voltar-checklists').addEventListener('click', () => {
+      renderizarTelaAdminChecklists();
+    });
+
+    ligarEventosTelaGerenciarPerguntas(checklistId, checklistTitulo, proximaOrdem);
+  }
+
+  // ------------------------------------------------------------
+  // Liga os cliques da tela de perguntas: abrir/cancelar formulário,
+  // salvar (criar OU editar) e excluir (lógica, ativo = false).
+  // ------------------------------------------------------------
+  function ligarEventosTelaGerenciarPerguntas(checklistId, checklistTitulo, proximaOrdem) {
+    const painel = document.getElementById('painel-form-pergunta');
+
+    document.getElementById('btn-abrir-form-pergunta').addEventListener('click', () => {
+      document.getElementById('titulo-form-pergunta').textContent = 'Cadastrar nova pergunta';
+      document.getElementById('input-pergunta-id-edicao').value = '';
+      document.getElementById('input-pergunta-ordem').value = proximaOrdem;
+      document.getElementById('input-pergunta-texto').value = '';
+      document.getElementById('input-pergunta-norma').value = '';
+      document.getElementById('input-pergunta-foto').checked = false;
+      document.getElementById('btn-salvar-pergunta').textContent = 'Salvar Pergunta';
+      painel.classList.remove('hidden');
+    });
+
+    document.getElementById('btn-cancelar-pergunta').addEventListener('click', () => {
+      painel.classList.add('hidden');
+    });
+
+    document.querySelectorAll('.btn-editar-pergunta').forEach(botao => {
+      botao.addEventListener('click', () => {
+        document.getElementById('titulo-form-pergunta').textContent = 'Editar pergunta';
+        document.getElementById('input-pergunta-id-edicao').value = botao.dataset.id;
+        document.getElementById('input-pergunta-ordem').value = botao.dataset.ordem;
+        document.getElementById('input-pergunta-texto').value = botao.dataset.texto;
+        document.getElementById('input-pergunta-norma').value = botao.dataset.norma;
+        document.getElementById('input-pergunta-foto').checked = (botao.dataset.foto === 'true');
+        document.getElementById('btn-salvar-pergunta').textContent = 'Salvar Alterações';
+        painel.classList.remove('hidden');
+        painel.scrollIntoView({ behavior: 'smooth' });
+      });
+    });
+
+    document.querySelectorAll('.btn-excluir-pergunta').forEach(botao => {
+      botao.addEventListener('click', async () => {
+        const confirmar = confirm(`Excluir a pergunta "${botao.dataset.texto}"? Auditorias já feitas com ela continuam salvas no histórico.`);
+        if (!confirmar) return;
+
+        const { error } = await supabaseClient
+          .from('perguntas_template')
+          .update({ ativo: false })
+          .eq('id', botao.dataset.id);
+
+        if (error) {
+          alert(`Erro ao excluir: ${error.message}`);
+          return;
+        }
+
+        renderizarTelaGerenciarPerguntas(checklistId, checklistTitulo);
+      });
+    });
+
+    document.getElementById('btn-salvar-pergunta').addEventListener('click', async () => {
+      const idEmEdicao = document.getElementById('input-pergunta-id-edicao').value;
+      const texto = document.getElementById('input-pergunta-texto').value.trim();
+      const norma = document.getElementById('input-pergunta-norma').value.trim() || null;
+      const exigeFoto = document.getElementById('input-pergunta-foto').checked;
+      const ordem = parseInt(document.getElementById('input-pergunta-ordem').value, 10) || proximaOrdem;
+      const avisoEl = document.getElementById('aviso-form-pergunta');
+
+      if (!texto) {
+        avisoEl.textContent = 'Por favor, preencha o texto da pergunta.';
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      const dadosPergunta = {
+        texto_pergunta: texto,
+        norma_regulamentadora_especifica: norma,
+        exige_foto: exigeFoto,
+        ordem: ordem
+      };
+
+      const operacao = idEmEdicao
+        ? supabaseClient.from('perguntas_template').update(dadosPergunta).eq('id', idEmEdicao)
+        : supabaseClient.from('perguntas_template').insert({ ...dadosPergunta, template_id: checklistId });
+
+      const { error } = await operacao;
+
+      if (error) {
+        avisoEl.textContent = `Erro ao salvar: ${error.message}`;
+        avisoEl.classList.remove('hidden');
+        return;
+      }
+
+      renderizarTelaGerenciarPerguntas(checklistId, checklistTitulo);
+    });
   }
 
   // ------------------------------------------------------------
