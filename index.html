@@ -288,6 +288,38 @@
   let assinaturaAuditorBase64 = null;
 
   // ------------------------------------------------------------
+  // MODO OFFLINE — BLOCO 2: guarda qual checklist/área/pessoas estão
+  // envolvidas na auditoria em andamento. Preenchido assim que a
+  // Identificação é concluída (esses dados hoje só passam de função
+  // em função como parâmetro — precisamos deles à parte pra montar
+  // o rascunho completo a qualquer momento).
+  // ------------------------------------------------------------
+  let rascunhoContexto = null;
+
+  // ------------------------------------------------------------
+  // Junta tudo que descreve a auditoria em andamento (contexto +
+  // respostas + fotos + assinatura) e grava no IndexedDB (Bloco 1).
+  // Chamamos essa função toda vez que algo muda, pra nunca perder o
+  // progresso. Ela roda "no fundo" — por isso quem chama não precisa
+  // esperar (não usa "await"), exceto no momento da assinatura.
+  // ------------------------------------------------------------
+  async function salvarProgressoRascunho() {
+    if (!rascunhoContexto) return;
+
+    try {
+      await salvarRascunho({
+        contexto: rascunhoContexto,
+        respostas: respostasEmAndamento,
+        fotos: fotosEmAndamento,
+        assinatura: assinaturaAuditorBase64,
+        atualizado_em: new Date().toISOString()
+      });
+    } catch (erro) {
+      console.error('Não foi possível salvar o rascunho local:', erro);
+    }
+  }
+
+  // ------------------------------------------------------------
   // Monta a árvore de áreas como uma lista de itens CLICÁVEIS,
   // usada dentro do painel de seleção de "Local da Inspeção".
   // Cada nível tem mais recuo (padding), deixando a hierarquia clara.
@@ -612,6 +644,13 @@
     respostasEmAndamento = {};
     fotosEmAndamento = {};
 
+    // MODO OFFLINE — Bloco 2: registra o contexto desta auditoria e já
+    // grava um primeiro rascunho local, mesmo antes de responder qualquer
+    // pergunta (assim, mesmo se cair a conexão/fechar a aba logo em
+    // seguida, já existe algo salvo pra retomar).
+    rascunhoContexto = { templateId, tituloChecklist, areaId, auditores, auditados };
+    salvarProgressoRascunho();
+
     conteudoApp.innerHTML = `
       <p class="text-gray-400">Carregando perguntas de "${tituloChecklist}"...</p>
     `;
@@ -777,6 +816,9 @@
         // tipo de resposta futuro funciona sem precisar mexer aqui.
         const coresPorNome = { verde: 'bg-green-600', vermelho: 'bg-red-600', cinza: 'bg-gray-500' };
         botao.classList.add(coresPorNome[botao.dataset.cor], 'text-white');
+
+        // MODO OFFLINE — Bloco 2: grava o progresso local a cada resposta
+        salvarProgressoRascunho();
       });
     });
 
@@ -785,6 +827,9 @@
       select.addEventListener('change', () => {
         const perguntaId = select.dataset.selectNota;
         respostasEmAndamento[perguntaId] = select.value;
+
+        // MODO OFFLINE — Bloco 2: grava o progresso local a cada resposta
+        salvarProgressoRascunho();
       });
     });
   }
@@ -889,6 +934,10 @@
       avisoEl.classList.add('hidden');
       assinaturaAuditorBase64 = canvas.toDataURL('image/png');
 
+      // MODO OFFLINE — Bloco 2: garante que a assinatura já fica salva
+      // localmente antes de tentar enviar ao Supabase.
+      await salvarProgressoRascunho();
+
       // Trava o botão e avisa que está salvando, pra evitar duplo-clique
       const botaoConfirmar = document.getElementById('btn-confirmar-assinatura');
       botaoConfirmar.disabled = true;
@@ -959,6 +1008,11 @@
         respostasEmAndamento = {};
         fotosEmAndamento = {};
         assinaturaAuditorBase64 = null;
+        rascunhoContexto = null;
+
+        // MODO OFFLINE — Bloco 2: já que salvou de verdade no Supabase,
+        // apaga o rascunho local — ele não serve mais pra nada.
+        await apagarRascunho();
 
         conteudoApp.innerHTML = `
           <div class="text-center py-16">
