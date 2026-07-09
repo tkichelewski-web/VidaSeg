@@ -147,6 +147,124 @@
 </div>
 
 <!-- ================================================================
+     MODO OFFLINE — BLOCO 1: CAMADA DE ACESSO AO INDEXEDDB
+     Este bloco só CRIA as funções de acesso ao banco local do
+     navegador (IndexedDB). Por enquanto, NENHUMA tela chama essas
+     funções ainda — isso é de propósito, pra testarmos elas sozinhas
+     primeiro, pelo Console do navegador, sem mexer no que já funciona.
+
+     Duas "gavetas" (object stores) dentro do banco local:
+       - rascunho_auditoria: a auditoria que está sendo preenchida
+         agora (só existe UMA por vez, por isso usamos sempre o
+         mesmo id fixo "atual").
+       - fila_sincronizacao: auditorias completas que não conseguiram
+         ser enviadas ao Supabase (por falta de internet ou erro),
+         esperando serem reenviadas.
+================================================================= -->
+<script>
+  const NOME_BANCO_LOCAL = 'vidaseg_offline';
+  const VERSAO_BANCO_LOCAL = 1;
+
+  // Abre o banco local (e cria as gavetas, se ainda não existirem).
+  // Devolve uma Promise porque o IndexedDB é assíncrono por natureza.
+  function abrirBancoLocal() {
+    return new Promise((resolve, reject) => {
+      const pedidoAbertura = indexedDB.open(NOME_BANCO_LOCAL, VERSAO_BANCO_LOCAL);
+
+      // Só roda na 1ª vez que o banco é criado neste navegador, ou
+      // quando no futuro aumentarmos o VERSAO_BANCO_LOCAL.
+      pedidoAbertura.onupgradeneeded = (evento) => {
+        const banco = evento.target.result;
+
+        if (!banco.objectStoreNames.contains('rascunho_auditoria')) {
+          banco.createObjectStore('rascunho_auditoria', { keyPath: 'id' });
+        }
+
+        if (!banco.objectStoreNames.contains('fila_sincronizacao')) {
+          banco.createObjectStore('fila_sincronizacao', { keyPath: 'id', autoIncrement: true });
+        }
+      };
+
+      pedidoAbertura.onsuccess = (evento) => resolve(evento.target.result);
+      pedidoAbertura.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+
+  // ------------------------------------------------------------
+  // RASCUNHO: a auditoria em andamento. Sempre sobrescreve o mesmo
+  // registro (id fixo "atual"), pois só existe um rascunho por vez.
+  // ------------------------------------------------------------
+  async function salvarRascunho(dadosRascunho) {
+    const banco = await abrirBancoLocal();
+    return new Promise((resolve, reject) => {
+      const transacao = banco.transaction('rascunho_auditoria', 'readwrite');
+      transacao.objectStore('rascunho_auditoria').put({ id: 'atual', ...dadosRascunho });
+      transacao.oncomplete = () => resolve();
+      transacao.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+
+  async function lerRascunho() {
+    const banco = await abrirBancoLocal();
+    return new Promise((resolve, reject) => {
+      const transacao = banco.transaction('rascunho_auditoria', 'readonly');
+      const pedido = transacao.objectStore('rascunho_auditoria').get('atual');
+      pedido.onsuccess = () => resolve(pedido.result || null);
+      pedido.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+
+  async function apagarRascunho() {
+    const banco = await abrirBancoLocal();
+    return new Promise((resolve, reject) => {
+      const transacao = banco.transaction('rascunho_auditoria', 'readwrite');
+      transacao.objectStore('rascunho_auditoria').delete('atual');
+      transacao.oncomplete = () => resolve();
+      transacao.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+
+  // ------------------------------------------------------------
+  // FILA DE SINCRONIZAÇÃO: auditorias completas aguardando reenvio.
+  // Usa autoIncrement (cada item recebe um id novo), pois pode haver
+  // várias auditorias pendentes ao mesmo tempo.
+  // ------------------------------------------------------------
+  async function adicionarNaFila(auditoriaCompleta) {
+    const banco = await abrirBancoLocal();
+    return new Promise((resolve, reject) => {
+      const transacao = banco.transaction('fila_sincronizacao', 'readwrite');
+      transacao.objectStore('fila_sincronizacao').add({
+        ...auditoriaCompleta,
+        status: 'pendente_sincronizacao',
+        criado_em: new Date().toISOString()
+      });
+      transacao.oncomplete = () => resolve();
+      transacao.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+
+  async function listarFila() {
+    const banco = await abrirBancoLocal();
+    return new Promise((resolve, reject) => {
+      const transacao = banco.transaction('fila_sincronizacao', 'readonly');
+      const pedido = transacao.objectStore('fila_sincronizacao').getAll();
+      pedido.onsuccess = () => resolve(pedido.result);
+      pedido.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+
+  async function removerDaFila(idNaFila) {
+    const banco = await abrirBancoLocal();
+    return new Promise((resolve, reject) => {
+      const transacao = banco.transaction('fila_sincronizacao', 'readwrite');
+      transacao.objectStore('fila_sincronizacao').delete(idNaFila);
+      transacao.oncomplete = () => resolve();
+      transacao.onerror = (evento) => reject(evento.target.error);
+    });
+  }
+</script>
+
+<!-- ================================================================
      JAVASCRIPT — O "cérebro" que troca de tela sem recarregar a página
 ================================================================= -->
 <script>
