@@ -339,6 +339,62 @@
   }
 
   // ------------------------------------------------------------
+  // PONTUAÇÃO — BLOCO 11: calcula o resultado de uma auditoria a partir
+  // das respostas dadas.
+  //
+  // Checklists de Cultura de Segurança: cada resposta vale pontos
+  // (Conforme=100, Oportunidade_Melhoria=50, Nao_Conforme=0; Não
+  // Aplicável fica de fora), tira a média, e classifica num estágio.
+  //
+  // Checklists normais: só o percentual simples de conformidade
+  // (Conforme ÷ respondidas, excluindo Não Aplicável), sem estágio.
+  //
+  // Devolve { percentual: null, estagio: null } se não houver nenhuma
+  // resposta que entre na conta (ex: checklist todo Sim/Não ou Nota).
+  // ------------------------------------------------------------
+  function calcularPontuacao(respostas, ehChecklistCulturaSeguranca) {
+    const valoresRespostas = Object.values(respostas);
+
+    if (ehChecklistCulturaSeguranca) {
+      const pontosPorResposta = { Conforme: 100, Oportunidade_Melhoria: 50, Nao_Conforme: 0 };
+      const pontuaveis = valoresRespostas.filter(v => v in pontosPorResposta);
+
+      if (pontuaveis.length === 0) return { percentual: null, estagio: null };
+
+      const somaPontos = pontuaveis.reduce((soma, v) => soma + pontosPorResposta[v], 0);
+      const percentual = somaPontos / pontuaveis.length;
+
+      let estagio;
+      if (percentual > 90) estagio = 'Excelente';
+      else if (percentual > 70) estagio = 'Bom';
+      else if (percentual > 50) estagio = 'Regular';
+      else estagio = 'Atenção';
+
+      return { percentual, estagio };
+    }
+
+    const respondidasValidas = valoresRespostas.filter(v => v === 'Conforme' || v === 'Nao_Conforme');
+    if (respondidasValidas.length === 0) return { percentual: null, estagio: null };
+
+    const totalConformes = respondidasValidas.filter(v => v === 'Conforme').length;
+    const percentual = (totalConformes / respondidasValidas.length) * 100;
+
+    return { percentual, estagio: null };
+  }
+
+  // Pequeno trecho de HTML reaproveitado nas duas telas finais (salvamento
+  // online e "salvo neste aparelho"), pra mostrar o resultado calculado.
+  function montarHtmlPontuacao(percentual, estagio) {
+    if (percentual === null) return '';
+
+    return `
+      <p class="text-lg font-semibold text-marca-jb mb-6">
+        Pontuação: ${percentual.toFixed(0)}%${estagio ? ` — Estágio: ${estagio}` : ''}
+      </p>
+    `;
+  }
+
+  // ------------------------------------------------------------
   // MODO OFFLINE — BLOCO 4: quando não há internet (ou a conexão cai
   // no meio do envio), a auditoria completa vai pra fila de
   // sincronização em vez de ser perdida. O rascunho "em andamento" é
@@ -346,6 +402,9 @@
   // pendente_sincronizacao, até ser enviada de verdade (Bloco 5).
   // ------------------------------------------------------------
   async function moverAuditoriaAtualParaFilaEAvisar(tituloChecklist) {
+    // PONTUAÇÃO — Bloco 11: calcula antes de resetar o estado em memória.
+    const { percentual, estagio } = calcularPontuacao(respostasEmAndamento, rascunhoContexto?.ehChecklistCulturaSeguranca);
+
     await adicionarNaFila({
       contexto: rascunhoContexto,
       respostas: respostasEmAndamento,
@@ -364,10 +423,11 @@
       <div class="text-center py-16">
         <div class="text-5xl mb-4">📴</div>
         <h2 class="text-2xl font-bold text-marca-jb mb-2">Salvo neste aparelho</h2>
-        <p class="text-gray-500 mb-6">
+        <p class="text-gray-500 mb-2">
           Sem conexão no momento. Sua auditoria "${tituloChecklist}" foi salva neste aparelho
           e será enviada automaticamente assim que a internet voltar. Não é preciso refazer nada.
         </p>
+        ${montarHtmlPontuacao(percentual, estagio)}
         <button id="btn-nova-auditoria-offline" class="bg-marca-jb text-white font-semibold px-6 py-3 rounded-lg hover:bg-marca-jb/90">
           Iniciar Nova Auditoria
         </button>
@@ -410,6 +470,10 @@
       fotos[perguntaId] = urlPublica.publicUrl;
     }
 
+    // PONTUAÇÃO — Bloco 11: mesmo cálculo usado no salvamento online direto,
+    // aplicado aqui pra quando a auditoria vem da fila de sincronização.
+    const { percentual, estagio } = calcularPontuacao(respostas, contexto.ehChecklistCulturaSeguranca);
+
     const { data: inspecaoCriada, error: erroInspecao } = await supabaseClient
       .from('inspecoes_executadas')
       .insert({
@@ -420,7 +484,9 @@
         nomes_auditados: contexto.auditados,
         assinatura_auditor_base64: assinatura,
         status: 'finalizada',
-        data_hora_fim: new Date().toISOString()
+        data_hora_fim: new Date().toISOString(),
+        percentual_conformidade: percentual,
+        estagio_cultura: estagio
       })
       .select()
       .single();
@@ -863,6 +929,12 @@
 
     const ehChecklistCulturaSeguranca = checklistInfo?.eh_cultura_seguranca || false;
 
+    // Atualiza o rascunho já com essa informação, pra ela "viajar" junto
+    // se a auditoria precisar ir pra fila offline (Bloco 4) e ser
+    // sincronizada depois (o cálculo da pontuação precisa saber disso).
+    rascunhoContexto.ehChecklistCulturaSeguranca = ehChecklistCulturaSeguranca;
+    salvarProgressoRascunho();
+
     if (!perguntas || perguntas.length === 0) {
       conteudoApp.innerHTML = `
         <p class="text-gray-500">Este checklist ainda não tem perguntas cadastradas na tabela
@@ -938,7 +1010,7 @@
       }
 
       avisoEl.classList.add('hidden');
-      abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId, auditores, auditados);
+      abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId, auditores, auditados, ehChecklistCulturaSeguranca);
     });
 
     // Liga um "escutador" em cada campo de foto.
@@ -1013,7 +1085,7 @@
   // Monta a tela de assinatura digital do auditor, usando um
   // <canvas> HTML5 como "quadro de desenho".
   // ------------------------------------------------------------
-  function abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId, auditores, auditados) {
+  function abrirTelaAssinatura(templateId, tituloChecklist, perguntas, areaId, auditores, auditados, ehChecklistCulturaSeguranca) {
     assinaturaAuditorBase64 = null; // zera assinatura anterior, se houver
 
     conteudoApp.innerHTML = `
@@ -1163,6 +1235,9 @@
         }
         await salvarProgressoRascunho();
 
+        // PONTUAÇÃO — Bloco 11: calcula o resultado desta auditoria.
+        const { percentual, estagio } = calcularPontuacao(respostasEmAndamento, ehChecklistCulturaSeguranca);
+
         // ------------------------------------------------------------
         // PASSO 1: cria o "cabeçalho" da auditoria em inspecoes_executadas.
         // O .select() no final pede pro Supabase devolver a linha criada,
@@ -1181,7 +1256,9 @@
             nomes_auditados: auditados,
             assinatura_auditor_base64: assinaturaAuditorBase64,
             status: 'finalizada',
-            data_hora_fim: new Date().toISOString()
+            data_hora_fim: new Date().toISOString(),
+            percentual_conformidade: percentual,
+            estagio_cultura: estagio
           })
           .select()
           .single();
@@ -1234,7 +1311,8 @@
           <div class="text-center py-16">
             <div class="text-5xl mb-4">✅</div>
             <h2 class="text-2xl font-bold text-marca-jb mb-2">Auditoria salva com sucesso!</h2>
-            <p class="text-gray-500 mb-6">"${tituloChecklist}" foi registrada por ${auditores.join(', ')}.</p>
+            <p class="text-gray-500 mb-2">"${tituloChecklist}" foi registrada por ${auditores.join(', ')}.</p>
+            ${montarHtmlPontuacao(percentual, estagio)}
             <button id="btn-nova-auditoria-final" class="bg-marca-jb text-white font-semibold px-6 py-3 rounded-lg hover:bg-marca-jb/90">
               Iniciar Nova Auditoria
             </button>
@@ -2135,3 +2213,6 @@
   // Ao abrir o app pela primeira vez, mostra o Dashboard
   navegarPara('dashboard');
 </script>
+
+</body>
+</html>
