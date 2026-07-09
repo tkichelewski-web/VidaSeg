@@ -94,6 +94,11 @@
       <p class="text-xs text-white/60 mt-1">Usina Santa Adélia</p>
     </div>
 
+    <!-- MODO OFFLINE — BLOCO 6: só aparece quando há auditorias salvas
+         neste aparelho aguardando envio pro Supabase. Fica escondido
+         (classe "hidden") quando a fila está vazia. -->
+    <div id="badge-fila-pendente" class="hidden mx-5 mt-3 px-3 py-2 bg-marca-lima/20 border border-marca-lima/40 text-marca-lima text-xs font-semibold rounded-lg text-center"></div>
+
     <!-- Links de navegação -->
     <nav class="flex-1 py-4 space-y-1">
       <button data-rota="dashboard" class="menu-item ativo w-full text-left px-5 py-3 flex items-center gap-3 hover:bg-white/5 transition">
@@ -334,6 +339,7 @@
       assinatura: assinaturaAuditorBase64
     });
     await apagarRascunho();
+    await atualizarBadgeFila();
 
     respostasEmAndamento = {};
     fotosEmAndamento = {};
@@ -449,7 +455,33 @@
       }
     } finally {
       sincronizandoFila = false;
+      await atualizarBadgeFila();
     }
+  }
+
+  // ------------------------------------------------------------
+  // MODO OFFLINE — BLOCO 6: mostra/esconde o aviso na sidebar com a
+  // quantidade de auditorias aguardando envio. Chamado sempre que a
+  // fila pode ter mudado (entrou item novo, ou terminou uma tentativa
+  // de sincronização) e uma vez ao abrir o app.
+  // ------------------------------------------------------------
+  async function atualizarBadgeFila() {
+    const badge = document.getElementById('badge-fila-pendente');
+    if (!badge) return;
+
+    const itensPendentes = await listarFila();
+
+    if (itensPendentes.length === 0) {
+      badge.classList.add('hidden');
+      return;
+    }
+
+    const texto = itensPendentes.length === 1
+      ? '1 auditoria aguardando envio'
+      : `${itensPendentes.length} auditorias aguardando envio`;
+
+    badge.textContent = `📤 ${texto}`;
+    badge.classList.remove('hidden');
   }
 
   // ------------------------------------------------------------
@@ -2005,6 +2037,11 @@
   window.addEventListener('online', processarFilaDeSincronizacao);
   setInterval(processarFilaDeSincronizacao, 30000);
   processarFilaDeSincronizacao(); // também tenta uma vez já ao abrir o app
+
+  // MODO OFFLINE — Bloco 6: mostra o badge de pendências já na abertura do
+  // app, mesmo se estiver offline (nesse caso, processarFilaDeSincronizacao
+  // acima nem chega a rodar, então precisa ser chamado aqui também).
+  atualizarBadgeFila();
 
   // Ao abrir o app pela primeira vez, mostra o Dashboard
   navegarPara('dashboard');
