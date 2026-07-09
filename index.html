@@ -1596,7 +1596,7 @@
 
     const { data: checklists, error } = await supabaseClient
       .from('checklists_templates')
-      .select('id, titulo, setor, norma_procedimento_base, ativo')
+      .select('id, titulo, setor, norma_procedimento_base, ativo, eh_cultura_seguranca')
       .order('titulo', { ascending: true });
 
     if (error) {
@@ -1611,13 +1611,17 @@
       ? checklistsAtivos.map(c => `
           <div class="bg-white border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-center hover:border-marca-lima transition">
             <div class="flex-1 cursor-pointer card-admin-checklist" data-id="${c.id}" data-titulo="${c.titulo}">
-              <h3 class="font-bold text-marca-jb">${c.titulo}</h3>
+              <h3 class="font-bold text-marca-jb">
+                ${c.titulo}
+                ${c.eh_cultura_seguranca ? '<span class="text-xs bg-marca-lima/30 text-marca-jb px-2 py-0.5 rounded ml-2 align-middle">🛡️ Cultura de Segurança</span>' : ''}
+              </h3>
               <p class="text-sm text-gray-500">Setor: ${c.setor || '—'} · ${c.norma_procedimento_base || 'sem norma vinculada'}</p>
             </div>
             <div class="flex items-center gap-3 shrink-0 ml-3">
               <span class="text-marca-jb text-sm font-semibold hidden md:inline">Gerenciar perguntas &rarr;</span>
               <button class="btn-editar-checklist text-gray-400 hover:text-marca-jb text-lg"
                 data-id="${c.id}" data-titulo="${c.titulo}" data-setor="${c.setor || ''}" data-norma="${c.norma_procedimento_base || ''}"
+                data-cultura="${c.eh_cultura_seguranca}"
                 title="Editar">✏️</button>
               <button class="btn-excluir-checklist text-gray-400 hover:text-red-600 text-lg"
                 data-id="${c.id}" data-titulo="${c.titulo}"
@@ -1678,6 +1682,12 @@
         <input id="input-checklist-norma" type="text" placeholder="Ex: NR-12 ou Procedimento Interno PRC-045"
           class="w-full border border-gray-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:ring-2 focus:ring-marca-lima">
 
+        <label class="inline-flex items-center gap-2 text-sm font-semibold text-gray-700 mb-3">
+          <input type="checkbox" id="input-checklist-cultura-seguranca" class="w-4 h-4">
+          Este checklist é de Cultura de Segurança
+          <span class="text-xs font-normal text-gray-400">(habilita a resposta "Oportunidade de Melhoria" e o cálculo de estágio)</span>
+        </label>
+
         <div id="aviso-form-checklist" class="hidden bg-red-50 border border-red-300 text-red-700 text-sm rounded-lg p-3 mb-3"></div>
 
         <div class="flex gap-2">
@@ -1713,6 +1723,7 @@
       document.getElementById('input-checklist-titulo').value = '';
       document.getElementById('input-checklist-setor').value = '';
       document.getElementById('input-checklist-norma').value = '';
+      document.getElementById('input-checklist-cultura-seguranca').checked = false;
       document.getElementById('btn-salvar-checklist').textContent = 'Salvar Checklist';
       painel.classList.remove('hidden');
     });
@@ -1730,6 +1741,7 @@
         document.getElementById('input-checklist-titulo').value = botao.dataset.titulo;
         document.getElementById('input-checklist-setor').value = botao.dataset.setor;
         document.getElementById('input-checklist-norma').value = botao.dataset.norma;
+        document.getElementById('input-checklist-cultura-seguranca').checked = (botao.dataset.cultura === 'true');
         document.getElementById('btn-salvar-checklist').textContent = 'Salvar Alterações';
         painel.classList.remove('hidden');
         painel.scrollIntoView({ behavior: 'smooth' });
@@ -1785,6 +1797,7 @@
       const titulo = document.getElementById('input-checklist-titulo').value.trim();
       const setor = document.getElementById('input-checklist-setor').value.trim() || null;
       const norma = document.getElementById('input-checklist-norma').value.trim() || null;
+      const ehCulturaSeguranca = document.getElementById('input-checklist-cultura-seguranca').checked;
       const avisoEl = document.getElementById('aviso-form-checklist');
 
       if (!titulo) {
@@ -1796,8 +1809,8 @@
       // Monta a operação certa: update() se já existe um id em edição,
       // insert() se o campo escondido estiver vazio (cadastro novo).
       const operacao = idEmEdicao
-        ? supabaseClient.from('checklists_templates').update({ titulo, setor, norma_procedimento_base: norma }).eq('id', idEmEdicao)
-        : supabaseClient.from('checklists_templates').insert({ titulo, setor, norma_procedimento_base: norma });
+        ? supabaseClient.from('checklists_templates').update({ titulo, setor, norma_procedimento_base: norma, eh_cultura_seguranca: ehCulturaSeguranca }).eq('id', idEmEdicao)
+        : supabaseClient.from('checklists_templates').insert({ titulo, setor, norma_procedimento_base: norma, eh_cultura_seguranca: ehCulturaSeguranca });
 
       const { error } = await operacao;
 
