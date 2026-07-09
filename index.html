@@ -761,37 +761,17 @@
         //    (isso usa a própria memória do navegador, ainda não subiu nada)
         previewEl.src = URL.createObjectURL(arquivo);
         previewEl.classList.remove('hidden');
-        statusEl.textContent = 'Enviando foto...';
+
+        // MODO OFFLINE — Bloco 3: em vez de subir a foto pro Supabase Storage
+        // agora, guardamos o próprio arquivo (Blob) no rascunho local. O
+        // envio de verdade só acontece no momento de "Confirmar Assinatura
+        // e Salvar" (função abrirTelaAssinatura) — assim, tirar foto
+        // funciona mesmo sem internet.
+        fotosEmAndamento[perguntaId] = arquivo;
+        await salvarProgressoRascunho();
+
+        statusEl.textContent = '📷 Foto salva neste aparelho — será enviada ao concluir a auditoria';
         statusEl.classList.add('text-marca-jb');
-
-        // 2. Monta um nome de arquivo único, pra nunca sobrescrever outra foto.
-        //    Formato: id-da-pergunta/timestamp-nomeoriginal.jpg
-        const nomeArquivo = `${perguntaId}/${Date.now()}-${arquivo.name}`;
-
-        // 3. Envia o arquivo de fato para o bucket fotos-inspecoes
-        const { error: erroUpload } = await supabaseClient
-          .storage
-          .from('fotos-inspecoes')
-          .upload(nomeArquivo, arquivo);
-
-        if (erroUpload) {
-          statusEl.textContent = `Erro ao enviar: ${erroUpload.message}`;
-          statusEl.classList.replace('text-marca-jb', 'text-red-600');
-          return;
-        }
-
-        // 4. Pede ao Supabase o link público permanente desse arquivo
-        const { data: urlPublica } = supabaseClient
-          .storage
-          .from('fotos-inspecoes')
-          .getPublicUrl(nomeArquivo);
-
-        // 5. Guarda essa URL no rascunho em memória, pra usar depois
-        //    quando gravarmos a inspeção inteira no banco (Bloco 3)
-        fotosEmAndamento[perguntaId] = urlPublica.publicUrl;
-
-        statusEl.textContent = '✓ Foto enviada com sucesso';
-        statusEl.classList.replace('text-marca-jb', 'text-green-600');
       });
     });
 
@@ -947,6 +927,40 @@
       // avisa educadamente) vai cair no "catch" lá embaixo e aparecer na tela,
       // em vez de travar o botão sem explicação.
       try {
+        // ------------------------------------------------------------
+        // MODO OFFLINE — Bloco 3: até agora, cada foto só existia como
+        // arquivo (Blob) guardado no rascunho local. Só AQUI, no momento
+        // de salvar de verdade, é que enviamos cada uma pro Supabase
+        // Storage e trocamos pela URL pública — feito antes do Passo 1
+        // pra não criar uma inspeção "pela metade" se uma foto falhar.
+        // ------------------------------------------------------------
+        for (const perguntaId of Object.keys(fotosEmAndamento)) {
+          const arquivo = fotosEmAndamento[perguntaId];
+          if (!(arquivo instanceof Blob)) continue; // já é uma URL enviada antes; não reenvia
+
+          const nomeArquivo = `${perguntaId}/${Date.now()}-${arquivo.name || 'foto.jpg'}`;
+          const { error: erroUpload } = await supabaseClient
+            .storage
+            .from('fotos-inspecoes')
+            .upload(nomeArquivo, arquivo);
+
+          if (erroUpload) {
+            avisoEl.textContent = `Erro ao enviar foto: ${erroUpload.message}`;
+            avisoEl.classList.remove('hidden');
+            botaoConfirmar.disabled = false;
+            botaoConfirmar.textContent = 'Confirmar Assinatura e Salvar →';
+            return;
+          }
+
+          const { data: urlPublica } = supabaseClient
+            .storage
+            .from('fotos-inspecoes')
+            .getPublicUrl(nomeArquivo);
+
+          fotosEmAndamento[perguntaId] = urlPublica.publicUrl;
+        }
+        await salvarProgressoRascunho();
+
         // ------------------------------------------------------------
         // PASSO 1: cria o "cabeçalho" da auditoria em inspecoes_executadas.
         // O .select() no final pede pro Supabase devolver a linha criada,
