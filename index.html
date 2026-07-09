@@ -360,6 +360,99 @@
   }
 
   // ------------------------------------------------------------
+  // MODO OFFLINE — BLOCO 5: envia UMA auditoria da fila pro Supabase.
+  // É o mesmo processo (foto → inspeção → respostas) que a tela de
+  // assinatura já faz — repetido aqui de propósito, em vez de
+  // reaproveitado, pra não mexer naquele fluxo já testado.
+  // Lança um erro (throw) se algo falhar, pra quem chamou saber que
+  // esse item ainda não pode sair da fila.
+  // ------------------------------------------------------------
+  async function enviarAuditoriaParaSupabase(dadosAuditoria) {
+    const { contexto, respostas, fotos, assinatura } = dadosAuditoria;
+
+    for (const perguntaId of Object.keys(fotos)) {
+      const arquivo = fotos[perguntaId];
+      if (!(arquivo instanceof Blob)) continue; // já é uma URL enviada antes
+
+      const nomeArquivo = `${perguntaId}/${Date.now()}-${arquivo.name || 'foto.jpg'}`;
+      const { error: erroUpload } = await supabaseClient
+        .storage
+        .from('fotos-inspecoes')
+        .upload(nomeArquivo, arquivo);
+
+      if (erroUpload) throw new Error(`Erro ao enviar foto: ${erroUpload.message}`);
+
+      const { data: urlPublica } = supabaseClient
+        .storage
+        .from('fotos-inspecoes')
+        .getPublicUrl(nomeArquivo);
+
+      fotos[perguntaId] = urlPublica.publicUrl;
+    }
+
+    const { data: inspecaoCriada, error: erroInspecao } = await supabaseClient
+      .from('inspecoes_executadas')
+      .insert({
+        template_id: contexto.templateId,
+        area_id: contexto.areaId,
+        nome_auditor: contexto.auditores.join(', '),
+        nomes_auditores: contexto.auditores,
+        nomes_auditados: contexto.auditados,
+        assinatura_auditor_base64: assinatura,
+        status: 'finalizada',
+        data_hora_fim: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (erroInspecao) throw new Error(`Erro ao salvar a inspeção: ${erroInspecao.message}`);
+
+    const linhasDeResposta = Object.keys(respostas).map(perguntaId => ({
+      inspecao_id: inspecaoCriada.id,
+      pergunta_id: perguntaId,
+      resposta: respostas[perguntaId],
+      foto_url: fotos[perguntaId] || null
+    }));
+
+    const { error: erroRespostas } = await supabaseClient
+      .from('respostas_itens')
+      .insert(linhasDeResposta);
+
+    if (erroRespostas) throw new Error(`Inspeção criada, mas houve erro ao salvar as respostas: ${erroRespostas.message}`);
+  }
+
+  // ------------------------------------------------------------
+  // MODO OFFLINE — BLOCO 5: percorre a fila e tenta enviar cada item
+  // pendente. Só remove da fila o que realmente foi confirmado. Se um
+  // item falhar (conexão caiu de novo), para por ali — os que sobraram
+  // tentam de novo na próxima chamada (evento online ou intervalo).
+  // "sincronizandoFila" evita que duas chamadas rodem ao mesmo tempo.
+  // ------------------------------------------------------------
+  let sincronizandoFila = false;
+
+  async function processarFilaDeSincronizacao() {
+    if (sincronizandoFila || !navigator.onLine) return;
+    sincronizandoFila = true;
+
+    try {
+      const itensPendentes = await listarFila();
+
+      for (const item of itensPendentes) {
+        try {
+          await enviarAuditoriaParaSupabase(item);
+          await removerDaFila(item.id);
+          console.log(`Auditoria da fila (id ${item.id}) sincronizada com sucesso.`);
+        } catch (erro) {
+          console.error(`Falha ao sincronizar auditoria da fila (id ${item.id}):`, erro);
+          break;
+        }
+      }
+    } finally {
+      sincronizandoFila = false;
+    }
+  }
+
+  // ------------------------------------------------------------
   // Monta a árvore de áreas como uma lista de itens CLICÁVEIS,
   // usada dentro do painel de seleção de "Local da Inspeção".
   // Cada nível tem mais recuo (padding), deixando a hierarquia clara.
@@ -1904,6 +1997,14 @@
       fecharMenuMobile();
     });
   });
+
+  // MODO OFFLINE — Bloco 5: liga os gatilhos que disparam a sincronização
+  // automática da fila — quando o navegador avisa que a conexão voltou,
+  // e periodicamente (a cada 30s) como segurança, já que celular nem
+  // sempre avisa direito quando a internet volta.
+  window.addEventListener('online', processarFilaDeSincronizacao);
+  setInterval(processarFilaDeSincronizacao, 30000);
+  processarFilaDeSincronizacao(); // também tenta uma vez já ao abrir o app
 
   // Ao abrir o app pela primeira vez, mostra o Dashboard
   navegarPara('dashboard');
