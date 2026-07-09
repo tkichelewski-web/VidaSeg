@@ -983,7 +983,7 @@
         //    de todos os botões e aplica só no que foi clicado agora.
         const grupo = document.querySelector(`[data-grupo-resposta="${perguntaId}"]`);
         grupo.querySelectorAll('.botao-resposta').forEach(b => {
-          b.classList.remove('bg-green-600', 'bg-red-600', 'bg-gray-500', 'text-white');
+          b.classList.remove('bg-green-600', 'bg-red-600', 'bg-gray-500', 'bg-yellow-600', 'text-white');
         });
 
         // A cor de destaque vem do data-cor do próprio botão clicado
@@ -2135,6 +2135,3 @@
   // Ao abrir o app pela primeira vez, mostra o Dashboard
   navegarPara('dashboard');
 </script>
-
-</body>
-</html>
