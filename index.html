@@ -1596,8 +1596,7 @@
 
     const { data: checklists, error } = await supabaseClient
       .from('checklists_templates')
-      .select('id, titulo, setor, norma_procedimento_base')
-      .eq('ativo', true)
+      .select('id, titulo, setor, norma_procedimento_base, ativo')
       .order('titulo', { ascending: true });
 
     if (error) {
@@ -1605,8 +1604,11 @@
       return;
     }
 
-    const listaHtml = (checklists && checklists.length > 0)
-      ? checklists.map(c => `
+    const checklistsAtivos = (checklists || []).filter(c => c.ativo);
+    const checklistsInativos = (checklists || []).filter(c => !c.ativo);
+
+    const listaHtml = (checklistsAtivos.length > 0)
+      ? checklistsAtivos.map(c => `
           <div class="bg-white border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-center hover:border-marca-lima transition">
             <div class="flex-1 cursor-pointer card-admin-checklist" data-id="${c.id}" data-titulo="${c.titulo}">
               <h3 class="font-bold text-marca-jb">${c.titulo}</h3>
@@ -1624,6 +1626,29 @@
           </div>
         `).join('')
       : `<p class="text-gray-500">Nenhum checklist cadastrado ainda.</p>`;
+
+    // Checklists desativados (ex: auditoria anual já aplicada) ficam numa
+    // seção à parte, só com a opção de reativar — não aparecem em Nova
+    // Auditoria enquanto estiverem aqui.
+    const listaInativosHtml = checklistsInativos.length > 0
+      ? `
+        <div class="mt-8">
+          <h3 class="text-sm font-semibold text-gray-400 uppercase mb-2">Checklists desativados</h3>
+          ${checklistsInativos.map(c => `
+            <div class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-2 flex justify-between items-center">
+              <div>
+                <h3 class="font-semibold text-gray-500">${c.titulo}</h3>
+                <p class="text-sm text-gray-400">Setor: ${c.setor || '—'}</p>
+              </div>
+              <button class="btn-reativar-checklist text-marca-jb text-sm font-semibold hover:underline shrink-0 ml-3"
+                data-id="${c.id}" data-titulo="${c.titulo}">
+                🔁 Reativar
+              </button>
+            </div>
+          `).join('')}
+        </div>
+      `
+      : '';
 
     conteudoApp.innerHTML = `
       <div class="flex justify-between items-center mb-2">
@@ -1666,6 +1691,7 @@
       </div>
 
       <div>${listaHtml}</div>
+      ${listaInativosHtml}
     `;
 
     ligarEventosTelaAdminChecklists();
@@ -1725,6 +1751,26 @@
 
         if (error) {
           alert(`Erro ao excluir: ${error.message}`);
+          return;
+        }
+
+        renderizarTelaAdminChecklists();
+      });
+    });
+
+    // Botão "🔁 Reativar" (só aparece nos checklists desativados): volta
+    // a ativo = true, fazendo o checklist aparecer de novo em Nova Auditoria.
+    // Útil pra auditorias anuais (ex: cultura de segurança) que ficam
+    // desativadas o resto do ano depois de aplicadas.
+    document.querySelectorAll('.btn-reativar-checklist').forEach(botao => {
+      botao.addEventListener('click', async () => {
+        const { error } = await supabaseClient
+          .from('checklists_templates')
+          .update({ ativo: true })
+          .eq('id', botao.dataset.id);
+
+        if (error) {
+          alert(`Erro ao reativar: ${error.message}`);
           return;
         }
 
