@@ -6,6 +6,20 @@
 <title>VidaSeg | Usina Santa Adélia</title>
 
 <!-- ================================================================
+     MODO OFFLINE — BLOCO 8: liga o Service Worker (arquivo sw.js).
+     Ele precisa estar na RAIZ do repositório, junto com este index.html.
+     A partir da primeira visita com internet, ele passa a guardar uma
+     cópia dos arquivos do app, permitindo abrir o VidaSeg mesmo offline.
+================================================================= -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js');
+    });
+  }
+</script>
+
+<!-- ================================================================
      TAILWIND VIA CDN
      Isso baixa o Tailwind pronto, sem precisar instalar nada no PC.
      Ideal pro piloto: zero configuração, funciona direto no GitHub Pages.
