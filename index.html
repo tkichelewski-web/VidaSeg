@@ -320,6 +320,46 @@
   }
 
   // ------------------------------------------------------------
+  // MODO OFFLINE — BLOCO 4: quando não há internet (ou a conexão cai
+  // no meio do envio), a auditoria completa vai pra fila de
+  // sincronização em vez de ser perdida. O rascunho "em andamento" é
+  // removido, porque a partir de agora ela vive na fila, com status
+  // pendente_sincronizacao, até ser enviada de verdade (Bloco 5).
+  // ------------------------------------------------------------
+  async function moverAuditoriaAtualParaFilaEAvisar(tituloChecklist) {
+    await adicionarNaFila({
+      contexto: rascunhoContexto,
+      respostas: respostasEmAndamento,
+      fotos: fotosEmAndamento,
+      assinatura: assinaturaAuditorBase64
+    });
+    await apagarRascunho();
+
+    respostasEmAndamento = {};
+    fotosEmAndamento = {};
+    assinaturaAuditorBase64 = null;
+    rascunhoContexto = null;
+
+    conteudoApp.innerHTML = `
+      <div class="text-center py-16">
+        <div class="text-5xl mb-4">📴</div>
+        <h2 class="text-2xl font-bold text-marca-jb mb-2">Salvo neste aparelho</h2>
+        <p class="text-gray-500 mb-6">
+          Sem conexão no momento. Sua auditoria "${tituloChecklist}" foi salva neste aparelho
+          e será enviada automaticamente assim que a internet voltar. Não é preciso refazer nada.
+        </p>
+        <button id="btn-nova-auditoria-offline" class="bg-marca-jb text-white font-semibold px-6 py-3 rounded-lg hover:bg-marca-jb/90">
+          Iniciar Nova Auditoria
+        </button>
+      </div>
+    `;
+
+    document.getElementById('btn-nova-auditoria-offline').addEventListener('click', () => {
+      navegarPara('nova-auditoria');
+    });
+  }
+
+  // ------------------------------------------------------------
   // Monta a árvore de áreas como uma lista de itens CLICÁVEIS,
   // usada dentro do painel de seleção de "Local da Inspeção".
   // Cada nível tem mais recuo (padding), deixando a hierarquia clara.
@@ -923,6 +963,13 @@
       botaoConfirmar.disabled = true;
       botaoConfirmar.textContent = 'Salvando...';
 
+      // MODO OFFLINE — Bloco 4: se já sabemos que não há internet, nem
+      // tentamos falar com o Supabase — vai direto pra fila local.
+      if (!navigator.onLine) {
+        await moverAuditoriaAtualParaFilaEAvisar(tituloChecklist);
+        return;
+      }
+
       // A partir daqui, qualquer erro inesperado (não só os que o Supabase
       // avisa educadamente) vai cair no "catch" lá embaixo e aparecer na tela,
       // em vez de travar o botão sem explicação.
@@ -1046,11 +1093,14 @@
       } catch (erroInesperado) {
         // Captura QUALQUER outro tipo de erro (ex: falha de rede,
         // erro de programação) que não veio educadamente do Supabase.
-        console.error('Erro inesperado ao salvar auditoria:', erroInesperado);
-        avisoEl.textContent = `Erro inesperado: ${erroInesperado.message}. Veja o Console (F12) para detalhes técnicos.`;
-        avisoEl.classList.remove('hidden');
-        botaoConfirmar.disabled = false;
-        botaoConfirmar.textContent = 'Confirmar Assinatura e Salvar →';
+        console.error('Erro inesperado ao salvar auditoria (tratado como queda de conexão):', erroInesperado);
+
+        // MODO OFFLINE — Bloco 4: um erro que cai aqui, no meio do envio,
+        // é quase sempre a conexão caindo (o navegador não conseguiu nem
+        // completar a chamada de rede). Em vez de só mostrar o erro e
+        // arriscar perder os dados, guardamos a auditoria inteira na
+        // fila local pra tentar de novo mais tarde.
+        await moverAuditoriaAtualParaFilaEAvisar(tituloChecklist);
       }
     });
   }
